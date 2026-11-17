@@ -1,0 +1,21 @@
+{
+    "ESPHome Bluetooth proxy": "Проксі ESPHome Bluetooth",
+    "Proxy host or IP": "Хост або IP проксі",
+    "proxy_host_help": "Проксі ESPHome у зоні дії пристроїв. Використовуйте його лише з цим адаптером.",
+    "API encryption key": "Ключ шифрування API",
+    "proxy_key_help": "Ключ base64 з api: encryption: key прошивки проксі. Зберігається зашифрованим.",
+    "Missing after (minutes)": "Відсутній через (хвилин)",
+    "seen_minutes_help": "Скільки пристрій може мовчати, перш ніж вважатиметься недоступним.",
+    "Devices": "Пристрої",
+    "devices_hint": "Вказуйте лише власні пристрої (MAC зі сканування). Пристрій, підключений до застосунку чи WiFi-хаба, нічого не передає й вважається недоступним. Сезонні пристрої не викликають попереджень.",
+    "Name": "Назва",
+    "Type": "Тип",
+    "MAC address": "MAC-адреса",
+    "Seasonal": "Сезонний",
+    "mac_error": "Неправильна MAC-адреса (XX:XX:XX:XX:XX:XX)",
+    "Light": "Світло",
+    "Dosing pump": "Дозатор",
+    "CO2 controller": "Контролер CO2",
+    "Doctor": "Doctor",
+    "Fan": "Вентилятор"
+}

@@ -1,0 +1,122 @@
+{
+    "common": {
+        "name": "chihiros",
+        "version": "0.0.1",
+        "news": {
+            "0.0.1": {
+                "en": "initial release",
+                "de": "Erstveröffentlichung",
+                "ru": "Начальная версия",
+                "pt": "lançamento inicial",
+                "nl": "Eerste uitgave",
+                "fr": "Première version",
+                "it": "Versione iniziale",
+                "es": "Versión inicial",
+                "pl": "Pierwsze wydanie",
+                "uk": "Початкова версія",
+                "zh-cn": "首次出版"
+            }
+        },
+        "titleLang": {
+            "en": "Chihiros aquarium (Bluetooth)",
+            "de": "Chihiros-Aquarium (Bluetooth)",
+            "ru": "Аквариум Chihiros (Bluetooth)",
+            "pt": "Aquário Chihiros (Bluetooth)",
+            "nl": "Chihiros-aquarium (Bluetooth)",
+            "fr": "Aquarium Chihiros (Bluetooth)",
+            "it": "Acquario Chihiros (Bluetooth)",
+            "es": "Acuario Chihiros (Bluetooth)",
+            "pl": "Akwarium Chihiros (Bluetooth)",
+            "uk": "Акваріум Chihiros (Bluetooth)",
+            "zh-cn": "Chihiros 水族箱（蓝牙）"
+        },
+        "desc": {
+            "en": "Chihiros aquarium devices (light, dosing pump, CO2, Doctor, fan) over Bluetooth through an ESPHome Bluetooth proxy",
+            "de": "Chihiros-Aquariengeräte (Licht, Dosierpumpe, CO2, Doctor, Lüfter) per Bluetooth über einen ESPHome-Bluetooth-Proxy",
+            "ru": "Устройства для аквариума Chihiros (свет, дозатор, CO2, Doctor, вентилятор) по Bluetooth через прокси ESPHome Bluetooth",
+            "pt": "Dispositivos de aquário Chihiros (luz, bomba doseadora, CO2, Doctor, ventilador) via Bluetooth através de um proxy Bluetooth ESPHome",
+            "nl": "Chihiros-aquariumapparaten (licht, doseerpomp, CO2, Doctor, ventilator) via Bluetooth met een ESPHome Bluetooth-proxy",
+            "fr": "Appareils d'aquarium Chihiros (éclairage, pompe doseuse, CO2, Doctor, ventilateur) en Bluetooth via un proxy Bluetooth ESPHome",
+            "it": "Dispositivi per acquario Chihiros (luce, pompa dosatrice, CO2, Doctor, ventola) via Bluetooth tramite un proxy Bluetooth ESPHome",
+            "es": "Dispositivos de acuario Chihiros (luz, bomba dosificadora, CO2, Doctor, ventilador) por Bluetooth mediante un proxy Bluetooth ESPHome",
+            "pl": "Urządzenia akwariowe Chihiros (oświetlenie, pompa dozująca, CO2, Doctor, wentylator) przez Bluetooth z proxy ESPHome Bluetooth",
+            "uk": "Акваріумні пристрої Chihiros (світло, дозатор, CO2, Doctor, вентилятор) через Bluetooth і проксі ESPHome Bluetooth",
+            "zh-cn": "通过 ESPHome 蓝牙代理以蓝牙连接 Chihiros 水族设备（灯、计量泵、CO2、Doctor、风扇）"
+        },
+        "authors": [
+            "Sven-83 <276080681+Sven-83@users.noreply.github.com>"
+        ],
+        "keywords": [
+            "chihiros",
+            "aquarium",
+            "bluetooth",
+            "ble",
+            "esphome"
+        ],
+        "licenseInformation": {
+            "type": "free",
+            "license": "MIT"
+        },
+        "platform": "Javascript/Node.js",
+        "icon": "chihiros.png",
+        "enabled": true,
+        "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.chihiros/main/admin/chihiros.png",
+        "readme": "https://github.com/Sven-83/ioBroker.chihiros/blob/main/README.md",
+        "loglevel": "info",
+        "tier": 3,
+        "mode": "daemon",
+        "type": "household",
+        "compact": true,
+        "connectionType": "local",
+        "dataSource": "push",
+        "adminUI": {
+            "config": "json"
+        },
+        "dependencies": [
+            {
+                "js-controller": ">=6.0.11"
+            }
+        ],
+        "globalDependencies": [
+            {
+                "admin": ">=7.6.20"
+            }
+        ]
+    },
+    "native": {
+        "proxyHost": "",
+        "proxyKey": "",
+        "devices": [],
+        "seenMinutes": 5
+    },
+    "encryptedNative": [
+        "proxyKey"
+    ],
+    "protectedNative": [
+        "proxyKey"
+    ],
+    "objects": [],
+    "instanceObjects": [
+        {
+            "_id": "info",
+            "type": "channel",
+            "common": {
+                "name": "Information"
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.connection",
+            "type": "state",
+            "common": {
+                "role": "indicator.connected",
+                "name": "Connected to the Bluetooth proxy",
+                "type": "boolean",
+                "read": true,
+                "write": false,
+                "def": false
+            },
+            "native": {}
+        }
+    ]
+}

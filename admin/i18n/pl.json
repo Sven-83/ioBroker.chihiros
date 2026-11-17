@@ -1,0 +1,21 @@
+{
+    "ESPHome Bluetooth proxy": "Proxy ESPHome Bluetooth",
+    "Proxy host or IP": "Host lub IP proxy",
+    "proxy_host_help": "Proxy ESPHome w zasięgu urządzeń. Używaj go tylko z tym adapterem.",
+    "API encryption key": "Klucz szyfrowania API",
+    "proxy_key_help": "Klucz base64 z api: encryption: key firmware proxy. Przechowywany w postaci zaszyfrowanej.",
+    "Missing after (minutes)": "Brak po (minutach)",
+    "seen_minutes_help": "Jak długo urządzenie może milczeć, zanim zostanie uznane za niedostępne.",
+    "Devices": "Urządzenia",
+    "devices_hint": "Wpisz tylko własne urządzenia (MAC ze skanu). Urządzenie połączone z aplikacją lub hubem WiFi nic nie nadaje i jest uznawane za niedostępne. Urządzenia sezonowe nie wywołują ostrzeżeń.",
+    "Name": "Nazwa",
+    "Type": "Typ",
+    "MAC address": "Adres MAC",
+    "Seasonal": "Sezonowe",
+    "mac_error": "Nieprawidłowy adres MAC (XX:XX:XX:XX:XX:XX)",
+    "Light": "Oświetlenie",
+    "Dosing pump": "Pompa dozująca",
+    "CO2 controller": "Sterownik CO2",
+    "Doctor": "Doctor",
+    "Fan": "Wentylator"
+}

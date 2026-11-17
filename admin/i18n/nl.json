@@ -1,0 +1,21 @@
+{
+    "ESPHome Bluetooth proxy": "ESPHome Bluetooth-proxy",
+    "Proxy host or IP": "Proxy-host of IP",
+    "proxy_host_help": "De ESPHome-proxy binnen bereik van de apparaten. Alleen door deze adapter gebruiken.",
+    "API encryption key": "API-coderingssleutel",
+    "proxy_key_help": "Base64-sleutel uit api: encryption: key van de proxy-firmware. Wordt versleuteld opgeslagen.",
+    "Missing after (minutes)": "Ontbreekt na (minuten)",
+    "seen_minutes_help": "Zo lang mag een apparaat stil zijn voordat het als onbereikbaar geldt.",
+    "Devices": "Apparaten",
+    "devices_hint": "Alleen eigen apparaten invoeren (MAC uit de scan). Een apparaat dat met de app of WiFi-hub verbonden is, zendt niets en geldt als onbereikbaar. Seizoensapparaten geven geen waarschuwing.",
+    "Name": "Naam",
+    "Type": "Type",
+    "MAC address": "MAC-adres",
+    "Seasonal": "Seizoensgebonden",
+    "mac_error": "Ongeldig MAC-adres (XX:XX:XX:XX:XX:XX)",
+    "Light": "Licht",
+    "Dosing pump": "Doseerpomp",
+    "CO2 controller": "CO2-regelaar",
+    "Doctor": "Doctor",
+    "Fan": "Ventilator"
+}

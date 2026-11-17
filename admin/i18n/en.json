@@ -1,0 +1,21 @@
+{
+    "ESPHome Bluetooth proxy": "ESPHome Bluetooth proxy",
+    "Proxy host or IP": "Proxy host or IP",
+    "proxy_host_help": "The ESPHome proxy within radio range of the devices. Use it with this adapter only.",
+    "API encryption key": "API encryption key",
+    "proxy_key_help": "Base64 key from api: encryption: key of the proxy firmware. Stored encrypted.",
+    "Missing after (minutes)": "Missing after (minutes)",
+    "seen_minutes_help": "How long a device may be silent before it counts as not reachable.",
+    "Devices": "Devices",
+    "devices_hint": "Enter your own devices only (MAC from the scan). A device connected to the app or the WiFi hub sends nothing and counts as not reachable. Seasonal devices (e.g. a fan used in summer) do not raise a warning.",
+    "Name": "Name",
+    "Type": "Type",
+    "MAC address": "MAC address",
+    "Seasonal": "Seasonal",
+    "mac_error": "Invalid MAC address (XX:XX:XX:XX:XX:XX)",
+    "Light": "Light",
+    "Dosing pump": "Dosing pump",
+    "CO2 controller": "CO2 controller",
+    "Doctor": "Doctor",
+    "Fan": "Fan"
+}

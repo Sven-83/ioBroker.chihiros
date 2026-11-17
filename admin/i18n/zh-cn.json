@@ -1,0 +1,21 @@
+{
+    "ESPHome Bluetooth proxy": "ESPHome 蓝牙代理",
+    "Proxy host or IP": "代理主机或 IP",
+    "proxy_host_help": "位于设备无线范围内的 ESPHome 代理，只应由本适配器使用。",
+    "API encryption key": "API 加密密钥",
+    "proxy_key_help": "代理固件中 api: encryption: key 的 base64 密钥，加密保存。",
+    "Missing after (minutes)": "多少分钟后视为缺失",
+    "seen_minutes_help": "设备静默多久后视为不可达。",
+    "Devices": "设备",
+    "devices_hint": "只填写自己的设备（扫描得到的 MAC）。已连接 App 或 WiFi Hub 的设备不会广播，会被视为不可达。季节性设备不会触发警告。",
+    "Name": "名称",
+    "Type": "类型",
+    "MAC address": "MAC 地址",
+    "Seasonal": "季节性",
+    "mac_error": "MAC 地址无效（XX:XX:XX:XX:XX:XX）",
+    "Light": "灯",
+    "Dosing pump": "计量泵",
+    "CO2 controller": "CO2 控制器",
+    "Doctor": "Doctor",
+    "Fan": "风扇"
+}
