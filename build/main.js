@@ -40,6 +40,7 @@ const CLOCK_REFRESH_MS = 24 * 36e5;
 const DOSE_CONFIRM_DELAY_MS = 15e3;
 const DOSE_MS_PER_ML = 6e3;
 const DOSE_CONFIRM_RETRY_MS = 3e4;
+const CO2_CHECK_DELAY_MS = 1e4;
 const FAN_CHECK_DELAY_MS = 1e4;
 const FAN_KICK_STEP_MS = 4e3;
 const TYPE_NAMES = {
@@ -529,6 +530,8 @@ class Chihiros extends utils.Adapter {
         return (0, import_commands.doserCommand)(stateId, value);
       case "fan":
         return (0, import_commands.fanCommand)(stateId, value);
+      case "co2":
+        return (0, import_commands.co2Command)(stateId, value);
       default:
         throw new import_commands.CommandError(`${stateId} is not writable`);
     }
@@ -571,6 +574,9 @@ class Chihiros extends utils.Adapter {
       if (confirm) {
         await this.setState(`${base}.commandResult`, "sent, waiting for the pump counter", true);
         void this.confirmDose(rt, confirm, before);
+      } else if (d.type === "co2" && d.powerState && typeof plan.states.on === "boolean") {
+        await this.setState(`${base}.commandResult`, "sent, checking the power", true);
+        void this.confirmCo2(rt, plan.states.on, seq);
       } else if (d.type === "fan" && d.powerState && typeof plan.states.level === "number") {
         await this.setState(`${base}.commandResult`, "sent, checking the power", true);
         void this.confirmFan(rt, plan.states.level, seq);
@@ -657,6 +663,37 @@ class Chihiros extends utils.Adapter {
       return null;
     }
     return st.val;
+  }
+  /**
+   * CO2: checks by the power of the controller whether the valve followed the command.
+   *
+   * @param rt Runtime data of the CO2 controller
+   * @param on Wanted state
+   * @param seq Command number; stops when a newer command came
+   */
+  async confirmCo2(rt, on, seq) {
+    const base = `devices.${rt.device.id}`;
+    await new Promise((r) => this.scheduler.setTimeout(r, CO2_CHECK_DELAY_MS));
+    if (this.stopping || seq !== rt.commandSeq) {
+      return;
+    }
+    try {
+      const w = await this.currentPower(rt);
+      let text;
+      let level = "debug";
+      if (w === null) {
+        text = "sent, not confirmed (no current power value)";
+      } else if (on ? (0, import_power.isOn)("co2", w) : w <= import_power.POWER_OFF_W) {
+        text = `confirmed: valve ${on ? "open" : "closed"} (${w} W)`;
+      } else {
+        text = `not confirmed: valve still ${on ? "closed" : "open"} (${w} W) - please check the CO2 controller`;
+        level = "warn";
+      }
+      await this.setState(`${base}.commandResult`, text, true);
+      this.log[level](`${rt.device.name}: ${text}`);
+    } catch (e) {
+      this.log.warn(`${rt.device.name}: power check failed: ${e.message}`);
+    }
   }
   /**
    * Fan: checks by the power whether a level command worked; if the fan does not start, kicks it

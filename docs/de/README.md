@@ -3,7 +3,7 @@
 Bindet Chihiros-Aquariengeräte (Licht WRGB II, Dosierpumpe, CO2-Steuerung, Doctor, Lüfter) per **Bluetooth** an ioBroker an –
 ohne Chihiros-Cloud und ohne WiFi-Hub. Der Adapter erreicht die Geräte über einen **ESPHome-Bluetooth-Proxy** in der Nähe des Aquariums.
 
-Stand: frühe Version. Alle Geräte lesen, Licht steuern, Handdosis der Dosierpumpe, Lüfterstufe. Weitere Befehle folgen in den nächsten Versionen.
+Stand: frühe Version. Alle Geräte lesen, Licht steuern, Handdosis der Dosierpumpe, Lüfterstufe, CO2 an/aus. Weitere Befehle folgen in den nächsten Versionen.
 
 ## Funktionen (bisher)
 
@@ -20,6 +20,7 @@ Stand: frühe Version. Alle Geräte lesen, Licht steuern, Handdosis der Dosierpu
 - **Licht steuern**: Rot, Grün, Blau, Weiß (0–255) und an/aus (`red`, `green`, `blue`, `white`, `on`). Befehle warten auf eine laufende Abfrage und laufen in einer eigenen kurzen Verbindung (Anmelden, Uhr, Befehl). Das Licht meldet die Werte nicht zurück: Die Datenpunkte zeigen, was der Adapter zuletzt gesetzt hat (`commandResult`: „sent, not confirmed“). Änderungen in der App sieht der Adapter nicht.
 - **Handdosis** der Dosierpumpe: ml in `pumpN.doseNow` schreiben (0,1–5 je Befehl, Sicherheitsgrenze). Etwa 15 s plus 6 s je ml später liest der Adapter den Gesamtzähler: `commandResult` meldet „confirmed: pump N total a -> b ml“ oder „not confirmed“.
 - **Lüfterstufe** 0–20 (0 = aus) in `level`. Der Lüfter meldet seine Stufe nicht: Der Datenpunkt zeigt, was der Adapter zuletzt gesetzt hat. Die Temperatursteuerung der App wird noch nicht unterstützt.
+- **CO2 an/aus** in `on`: an = Zeitplan des Controllers 00:00–23:59 (Ventil den ganzen Tag offen), aus = Zeitplan leer. Das überschreibt den Zeitplan aus der App. Mit Leistungs-Datenpunkt prüft der Adapter 10 s später, ob das Ventil gefolgt ist (offen ab 1 W). Die Steckdose des Controllers muss immer an bleiben: CO2 wird nur per Bluetooth geschaltet, nie über die Steckdose.
 - **Leistungsmessung** (optional, Lüfter und CO2-Steuerung): Mit einem Leistungs-Datenpunkt je Gerät (z. B. Shelly-Steckdose, wird nur gelesen, nie geschaltet) zeigt der Adapter `running` (Lüfter, ab 0,5 W) bzw. `valveOpen` (CO2, ab 1 W). Nach jedem Stufenbefehl prüft er 10 s später die Leistung; läuft der Lüfter nicht an, stößt er ihn wie in der App an: Stufen 20, 11, 4, 20, 11, jede in eigener Verbindung mit Strommessung, dann die gewünschte Stufe (höchstens etwa 1 Minute). Wie die App sendet jeder Lüfterbefehl vorher die Abfragen a5/04 [06] und [08]. `commandResult`: „confirmed: running“, „confirmed after kick“ oder „not running after 5 kick steps“ (Warnung).
 - **Uhr der Geräte stellen** (abschaltbar): beim Licht ab 2 Minuten Abweichung, bei den anderen Geräten nach dem Adapterstart, wenn sie wieder gehört werden (z. B. nach Stromausfall) und einmal am Tag. Jeder Befehl stellt die Uhr mit, wie die App.
 

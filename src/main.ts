@@ -11,6 +11,7 @@ import { type GattApi, runSession, SessionError } from './lib/gatt';
 import {
     COMMON_COMMAND_STATES,
     clockFrame,
+    co2Command,
     CommandError,
     type CommandPlan,
     doserCommand,
@@ -43,6 +44,8 @@ const DOSE_CONFIRM_DELAY_MS = 15_000;
 const DOSE_MS_PER_ML = 6_000;
 /** Second counter check */
 const DOSE_CONFIRM_RETRY_MS = 30_000;
+/** CO2: power check after a command */
+const CO2_CHECK_DELAY_MS = 10_000;
 /** Fan: power check after a level command and after the kick */
 const FAN_CHECK_DELAY_MS = 10_000;
 /** Fan: wait after each kick level before the power is checked */
@@ -582,6 +585,8 @@ class Chihiros extends utils.Adapter {
                 return doserCommand(stateId, value);
             case 'fan':
                 return fanCommand(stateId, value);
+            case 'co2':
+                return co2Command(stateId, value);
             default:
                 throw new CommandError(`${stateId} is not writable`);
         }
@@ -624,6 +629,9 @@ class Chihiros extends utils.Adapter {
             if (confirm) {
                 await this.setState(`${base}.commandResult`, 'sent, waiting for the pump counter', true);
                 void this.confirmDose(rt, confirm, before);
+            } else if (d.type === 'co2' && d.powerState && typeof plan.states.on === 'boolean') {
+                await this.setState(`${base}.commandResult`, 'sent, checking the power', true);
+                void this.confirmCo2(rt, plan.states.on, seq);
             } else if (d.type === 'fan' && d.powerState && typeof plan.states.level === 'number') {
                 await this.setState(`${base}.commandResult`, 'sent, checking the power', true);
                 void this.confirmFan(rt, plan.states.level, seq);
@@ -718,6 +726,38 @@ class Chihiros extends utils.Adapter {
             return null;
         }
         return st.val;
+    }
+
+    /**
+     * CO2: checks by the power of the controller whether the valve followed the command.
+     *
+     * @param rt Runtime data of the CO2 controller
+     * @param on Wanted state
+     * @param seq Command number; stops when a newer command came
+     */
+    private async confirmCo2(rt: DeviceRuntime, on: boolean, seq: number): Promise<void> {
+        const base = `devices.${rt.device.id}`;
+        await new Promise<void>(r => this.scheduler.setTimeout(r, CO2_CHECK_DELAY_MS));
+        if (this.stopping || seq !== rt.commandSeq) {
+            return;
+        }
+        try {
+            const w = await this.currentPower(rt);
+            let text: string;
+            let level: 'debug' | 'warn' = 'debug';
+            if (w === null) {
+                text = 'sent, not confirmed (no current power value)';
+            } else if (on ? isOn('co2', w) : w <= POWER_OFF_W) {
+                text = `confirmed: valve ${on ? 'open' : 'closed'} (${w} W)`;
+            } else {
+                text = `not confirmed: valve still ${on ? 'closed' : 'open'} (${w} W) - please check the CO2 controller`;
+                level = 'warn';
+            }
+            await this.setState(`${base}.commandResult`, text, true);
+            this.log[level](`${rt.device.name}: ${text}`);
+        } catch (e) {
+            this.log.warn(`${rt.device.name}: power check failed: ${(e as Error).message}`);
+        }
     }
 
     /**

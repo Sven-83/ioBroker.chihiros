@@ -25,12 +25,15 @@ __export(commands_exports, {
   MAX_FAN_LEVEL: () => MAX_FAN_LEVEL,
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
+  MODE_CO2_SCHEDULE: () => MODE_CO2_SCHEDULE,
   MODE_DOSE: () => MODE_DOSE,
   MODE_QUERY: () => MODE_QUERY,
+  MODE_SETTING: () => MODE_SETTING,
   RESULT_UNACKED: () => RESULT_UNACKED,
   RESULT_UNCONFIRMED: () => RESULT_UNCONFIRMED,
   clockFrame: () => clockFrame,
   clockParams: () => clockParams,
+  co2Command: () => co2Command,
   doserCommand: () => doserCommand,
   fanCommand: () => fanCommand,
   lightCommand: () => lightCommand,
@@ -44,6 +47,8 @@ const MODE_QUERY = 4;
 const MODE_CHANNEL = 7;
 const MODE_DOSE = 27;
 const MAX_DOSE_ML = 5;
+const MODE_SETTING = 5;
+const MODE_CO2_SCHEDULE = 22;
 const MAX_FAN_LEVEL = 20;
 const LIGHT_CHANNELS = ["red", "green", "blue", "white"];
 const RESULT_UNCONFIRMED = "sent, not confirmed (the device does not report this value)";
@@ -118,6 +123,20 @@ function writeStates(type) {
           def: 0
         }
       }));
+    case "co2":
+      return [
+        {
+          id: "on",
+          common: {
+            name: "CO2 on (schedule 00:00-23:59) / off (schedule empty); overwrites the schedule of the app",
+            type: "boolean",
+            role: "switch",
+            read: true,
+            write: true,
+            def: false
+          }
+        }
+      ];
     case "fan":
       return [
         {
@@ -220,6 +239,28 @@ function fanCommand(id, value) {
     states: { level: v }
   };
 }
+function co2Command(id, value) {
+  if (id !== "on") {
+    throw new CommandError(`${id} is not writable`);
+  }
+  let on;
+  if (value === true || value === 1 || value === "true") {
+    on = true;
+  } else if (value === false || value === 0 || value === "false") {
+    on = false;
+  } else {
+    throw new CommandError(`invalid value ${JSON.stringify(value)} (true/false)`);
+  }
+  return {
+    label: on ? "CO2 on (schedule 00:00-23:59)" : "CO2 off (schedule empty)",
+    frames: [
+      [import_protocol.CMD_5A, MODE_SETTING, [7, 255, 255]],
+      [import_protocol.CMD_5A, MODE_CO2_SCHEDULE, on ? [0, 0, 100] : [0, 0, 111]],
+      [import_protocol.CMD_5A, MODE_CO2_SCHEDULE, on ? [23, 59, 0] : [23, 59, 111]]
+    ],
+    states: { on }
+  };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   COMMON_COMMAND_STATES,
@@ -229,12 +270,15 @@ function fanCommand(id, value) {
   MAX_FAN_LEVEL,
   MODE_CHANNEL,
   MODE_CLOCK,
+  MODE_CO2_SCHEDULE,
   MODE_DOSE,
   MODE_QUERY,
+  MODE_SETTING,
   RESULT_UNACKED,
   RESULT_UNCONFIRMED,
   clockFrame,
   clockParams,
+  co2Command,
   doserCommand,
   fanCommand,
   lightCommand,

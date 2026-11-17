@@ -19,6 +19,11 @@ export const MODE_DOSE = 0x1b;
 /** Largest manual dose per command in ml (safety limit, Sven 17.11.2026) */
 export const MAX_DOSE_ML = 5;
 
+/** Mode byte: setting before a schedule write, CO2 controller sends [07 ff ff] like the app (16.11.2026) */
+export const MODE_SETTING = 0x05;
+/** Mode byte: CO2 schedule slot, params [hour, minute, action]; action 0x64 = open, 0x00 = close, 0x6f = empty */
+export const MODE_CO2_SCHEDULE = 0x16;
+
 /** Highest fan level in the app (Sven 17.11.2026) */
 export const MAX_FAN_LEVEL = 20;
 
@@ -126,6 +131,20 @@ export function writeStates(type: DeviceType): StateDef[] {
                     def: 0,
                 },
             }));
+        case 'co2':
+            return [
+                {
+                    id: 'on',
+                    common: {
+                        name: 'CO2 on (schedule 00:00-23:59) / off (schedule empty); overwrites the schedule of the app',
+                        type: 'boolean',
+                        role: 'switch',
+                        read: true,
+                        write: true,
+                        def: false,
+                    },
+                },
+            ];
         case 'fan':
             return [
                 {
@@ -271,5 +290,36 @@ export function fanCommand(id: string, value: ioBroker.StateValue): CommandPlan 
             [CMD_5A, MODE_CHANNEL, [0xff, v]],
         ],
         states: { level: v },
+    };
+}
+
+/**
+ * Builds the frames to switch CO2 on or off through the schedule of the controller (write test 16.11.2026,
+ * confirmed by the power of the controller): on = open at 00:00, close at 23:59; off = both slots empty.
+ * The plug of the controller always stays on; it is never switched.
+ *
+ * @param id Relative state ID (on)
+ * @param value Written value
+ */
+export function co2Command(id: string, value: ioBroker.StateValue): CommandPlan {
+    if (id !== 'on') {
+        throw new CommandError(`${id} is not writable`);
+    }
+    let on: boolean;
+    if (value === true || value === 1 || value === 'true') {
+        on = true;
+    } else if (value === false || value === 0 || value === 'false') {
+        on = false;
+    } else {
+        throw new CommandError(`invalid value ${JSON.stringify(value)} (true/false)`);
+    }
+    return {
+        label: on ? 'CO2 on (schedule 00:00-23:59)' : 'CO2 off (schedule empty)',
+        frames: [
+            [CMD_5A, MODE_SETTING, [0x07, 0xff, 0xff]],
+            [CMD_5A, MODE_CO2_SCHEDULE, on ? [0x00, 0x00, 0x64] : [0x00, 0x00, 0x6f]],
+            [CMD_5A, MODE_CO2_SCHEDULE, on ? [0x17, 0x3b, 0x00] : [0x17, 0x3b, 0x6f]],
+        ],
+        states: { on },
     };
 }

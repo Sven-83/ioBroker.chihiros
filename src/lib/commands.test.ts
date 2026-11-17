@@ -1,5 +1,14 @@
 import { expect } from 'chai';
-import { clockFrame, clockParams, CommandError, doserCommand, fanCommand, lightCommand, writeStates } from './commands';
+import {
+    clockFrame,
+    clockParams,
+    co2Command,
+    CommandError,
+    doserCommand,
+    fanCommand,
+    lightCommand,
+    writeStates,
+} from './commands';
 
 const CUR = { red: 133, green: 84, blue: 129, white: 65, on: true };
 
@@ -15,7 +24,8 @@ describe('commands', () => {
         ]);
         expect(writeStates('doser')[0].common.max).to.equal(5);
         expect(writeStates('fan').map(s => s.id)).to.deep.equal(['level']);
-        expect(writeStates('co2')).to.deep.equal([]);
+        expect(writeStates('co2').map(s => s.id)).to.deep.equal(['on']);
+        expect(writeStates('doctor')).to.deep.equal([]);
     });
 
     it('builds the clock frame like the app', () => {
@@ -128,5 +138,32 @@ describe('commands', () => {
             expect(() => fanCommand('level', v)).to.throw(CommandError);
         }
         expect(() => fanCommand('speed', 1)).to.throw(/not writable/);
+    });
+
+    it('switches CO2 through the schedule like the write test', () => {
+        // write test 16.11.2026 (decimal there): [90,5,[7,255,255]], [90,22,[0,0,100]], [90,22,[23,59,0]] = on
+        expect(co2Command('on', true)).to.deep.equal({
+            label: 'CO2 on (schedule 00:00-23:59)',
+            frames: [
+                [0x5a, 0x05, [7, 255, 255]],
+                [0x5a, 22, [0, 0, 100]],
+                [0x5a, 22, [23, 59, 0]],
+            ],
+            states: { on: true },
+        });
+        // off: [90,22,[0,0,111]], [90,22,[23,59,111]]
+        expect(co2Command('on', 'false').frames).to.deep.equal([
+            [0x5a, 0x05, [7, 255, 255]],
+            [0x5a, 22, [0, 0, 111]],
+            [0x5a, 22, [23, 59, 111]],
+        ]);
+        expect(co2Command('on', 0).states).to.deep.equal({ on: false });
+    });
+
+    it('rejects invalid CO2 values', () => {
+        for (const v of ['on', 2, null, 'x']) {
+            expect(() => co2Command('on', v)).to.throw(CommandError);
+        }
+        expect(() => co2Command('valveOpen', true)).to.throw(/not writable/);
     });
 });
