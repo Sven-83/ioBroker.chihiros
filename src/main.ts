@@ -13,6 +13,7 @@ import {
     clockFrame,
     co2Command,
     CommandError,
+    doctorCommand,
     type CommandPlan,
     doserCommand,
     fanCommand,
@@ -587,6 +588,8 @@ class Chihiros extends utils.Adapter {
                 return fanCommand(stateId, value);
             case 'co2':
                 return co2Command(stateId, value);
+            case 'doctor':
+                return doctorCommand(stateId, value);
             default:
                 throw new CommandError(`${stateId} is not writable`);
         }

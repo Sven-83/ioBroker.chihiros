@@ -20,12 +20,14 @@ var commands_exports = {};
 __export(commands_exports, {
   COMMON_COMMAND_STATES: () => COMMON_COMMAND_STATES,
   CommandError: () => CommandError,
+  DOCTOR_MODES: () => DOCTOR_MODES,
   LIGHT_CHANNELS: () => LIGHT_CHANNELS,
   MAX_DOSE_ML: () => MAX_DOSE_ML,
   MAX_FAN_LEVEL: () => MAX_FAN_LEVEL,
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
   MODE_CO2_SCHEDULE: () => MODE_CO2_SCHEDULE,
+  MODE_DOCTOR_RUN: () => MODE_DOCTOR_RUN,
   MODE_DOSE: () => MODE_DOSE,
   MODE_QUERY: () => MODE_QUERY,
   MODE_SETTING: () => MODE_SETTING,
@@ -34,6 +36,7 @@ __export(commands_exports, {
   clockFrame: () => clockFrame,
   clockParams: () => clockParams,
   co2Command: () => co2Command,
+  doctorCommand: () => doctorCommand,
   doserCommand: () => doserCommand,
   fanCommand: () => fanCommand,
   lightCommand: () => lightCommand,
@@ -49,6 +52,11 @@ const MODE_DOSE = 27;
 const MAX_DOSE_ML = 5;
 const MODE_SETTING = 5;
 const MODE_CO2_SCHEDULE = 22;
+const MODE_DOCTOR_RUN = 1;
+const DOCTOR_MODES = {
+  fish: { setting: 53, run: [1, 114] },
+  shrimp: { setting: 54, run: [1, 8] }
+};
 const MAX_FAN_LEVEL = 20;
 const LIGHT_CHANNELS = ["red", "green", "blue", "white"];
 const RESULT_UNCONFIRMED = "sent, not confirmed (the device does not report this value)";
@@ -134,6 +142,21 @@ function writeStates(type) {
             read: true,
             write: true,
             def: false
+          }
+        }
+      ];
+    case "doctor":
+      return [
+        {
+          id: "mode",
+          common: {
+            name: "Mode (set by this adapter, not reported by the Doctor)",
+            type: "string",
+            role: "level.mode",
+            states: { fish: "Fish", shrimp: "Shrimp" },
+            read: true,
+            write: true,
+            def: ""
           }
         }
       ];
@@ -261,16 +284,36 @@ function co2Command(id, value) {
     states: { on }
   };
 }
+function doctorCommand(id, value) {
+  if (id !== "mode") {
+    throw new CommandError(`${id} is not writable`);
+  }
+  const mode = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (mode !== "fish" && mode !== "shrimp") {
+    throw new CommandError(`invalid mode ${JSON.stringify(value)} (fish/shrimp)`);
+  }
+  const m = DOCTOR_MODES[mode];
+  return {
+    label: `mode ${mode}`,
+    frames: [
+      [import_protocol.CMD_5A, MODE_SETTING, [m.setting, 255, 255]],
+      [import_protocol.CMD_A5, MODE_DOCTOR_RUN, [...m.run]]
+    ],
+    states: { mode }
+  };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   COMMON_COMMAND_STATES,
   CommandError,
+  DOCTOR_MODES,
   LIGHT_CHANNELS,
   MAX_DOSE_ML,
   MAX_FAN_LEVEL,
   MODE_CHANNEL,
   MODE_CLOCK,
   MODE_CO2_SCHEDULE,
+  MODE_DOCTOR_RUN,
   MODE_DOSE,
   MODE_QUERY,
   MODE_SETTING,
@@ -279,6 +322,7 @@ function co2Command(id, value) {
   clockFrame,
   clockParams,
   co2Command,
+  doctorCommand,
   doserCommand,
   fanCommand,
   lightCommand,

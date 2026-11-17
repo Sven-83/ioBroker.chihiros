@@ -532,6 +532,8 @@ class Chihiros extends utils.Adapter {
         return (0, import_commands.fanCommand)(stateId, value);
       case "co2":
         return (0, import_commands.co2Command)(stateId, value);
+      case "doctor":
+        return (0, import_commands.doctorCommand)(stateId, value);
       default:
         throw new import_commands.CommandError(`${stateId} is not writable`);
     }

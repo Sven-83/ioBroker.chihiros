@@ -4,6 +4,7 @@ import {
     clockParams,
     co2Command,
     CommandError,
+    doctorCommand,
     doserCommand,
     fanCommand,
     lightCommand,
@@ -25,7 +26,8 @@ describe('commands', () => {
         expect(writeStates('doser')[0].common.max).to.equal(5);
         expect(writeStates('fan').map(s => s.id)).to.deep.equal(['level']);
         expect(writeStates('co2').map(s => s.id)).to.deep.equal(['on']);
-        expect(writeStates('doctor')).to.deep.equal([]);
+        expect(writeStates('doctor').map(s => s.id)).to.deep.equal(['mode']);
+        expect(writeStates('doctor')[0].common.states).to.deep.equal({ fish: 'Fish', shrimp: 'Shrimp' });
     });
 
     it('builds the clock frame like the app', () => {
@@ -165,5 +167,29 @@ describe('commands', () => {
             expect(() => co2Command('on', v)).to.throw(CommandError);
         }
         expect(() => co2Command('valveOpen', true)).to.throw(/not writable/);
+    });
+
+    it('sets the Doctor mode like the app', () => {
+        // capture 16.11.2026: 5a 01 08 00 28 05 36 ff ff 12 + a5 01 07 00 29 01 01 08 27 = shrimp
+        expect(doctorCommand('mode', 'shrimp')).to.deep.equal({
+            label: 'mode shrimp',
+            frames: [
+                [0x5a, 0x05, [0x36, 0xff, 0xff]],
+                [0xa5, 0x01, [0x01, 0x08]],
+            ],
+            states: { mode: 'shrimp' },
+        });
+        // 5a 01 08 00 2c 05 35 ff ff 15 + a5 01 07 00 2d 01 01 72 59 = fish
+        expect(doctorCommand('mode', ' Fish ').frames).to.deep.equal([
+            [0x5a, 0x05, [0x35, 0xff, 0xff]],
+            [0xa5, 0x01, [0x01, 0x72]],
+        ]);
+    });
+
+    it('rejects unknown Doctor modes', () => {
+        for (const v of ['plants', '', 1, null, true]) {
+            expect(() => doctorCommand('mode', v)).to.throw(CommandError);
+        }
+        expect(() => doctorCommand('waterTemp', 'fish')).to.throw(/not writable/);
     });
 });

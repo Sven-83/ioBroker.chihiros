@@ -24,6 +24,14 @@ export const MODE_SETTING = 0x05;
 /** Mode byte: CO2 schedule slot, params [hour, minute, action]; action 0x64 = open, 0x00 = close, 0x6f = empty */
 export const MODE_CO2_SCHEDULE = 0x16;
 
+/** Mode byte (a5 family): Doctor run setting after the mode, params [01 08] shrimp / [01 72] fish (capture 16.11.2026) */
+export const MODE_DOCTOR_RUN = 0x01;
+/** Doctor modes with their frames (capture 16.11.2026, hex) */
+export const DOCTOR_MODES = {
+    fish: { setting: 0x35, run: [0x01, 0x72] },
+    shrimp: { setting: 0x36, run: [0x01, 0x08] },
+} as const;
+
 /** Highest fan level in the app (Sven 17.11.2026) */
 export const MAX_FAN_LEVEL = 20;
 
@@ -142,6 +150,21 @@ export function writeStates(type: DeviceType): StateDef[] {
                         read: true,
                         write: true,
                         def: false,
+                    },
+                },
+            ];
+        case 'doctor':
+            return [
+                {
+                    id: 'mode',
+                    common: {
+                        name: 'Mode (set by this adapter, not reported by the Doctor)',
+                        type: 'string',
+                        role: 'level.mode',
+                        states: { fish: 'Fish', shrimp: 'Shrimp' },
+                        read: true,
+                        write: true,
+                        def: '',
                     },
                 },
             ];
@@ -321,5 +344,30 @@ export function co2Command(id: string, value: ioBroker.StateValue): CommandPlan 
             [CMD_5A, MODE_CO2_SCHEDULE, on ? [0x17, 0x3b, 0x00] : [0x17, 0x3b, 0x6f]],
         ],
         states: { on },
+    };
+}
+
+/**
+ * Builds the frames for the Doctor mode (capture 16.11.2026): 5a/05 [35|36 ff ff], then a5/01 [01 72|08].
+ *
+ * @param id Relative state ID (mode)
+ * @param value Written mode: fish or shrimp
+ */
+export function doctorCommand(id: string, value: ioBroker.StateValue): CommandPlan {
+    if (id !== 'mode') {
+        throw new CommandError(`${id} is not writable`);
+    }
+    const mode = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (mode !== 'fish' && mode !== 'shrimp') {
+        throw new CommandError(`invalid mode ${JSON.stringify(value)} (fish/shrimp)`);
+    }
+    const m = DOCTOR_MODES[mode];
+    return {
+        label: `mode ${mode}`,
+        frames: [
+            [CMD_5A, MODE_SETTING, [m.setting, 0xff, 0xff]],
+            [CMD_A5, MODE_DOCTOR_RUN, [...m.run]],
+        ],
+        states: { mode },
     };
 }
