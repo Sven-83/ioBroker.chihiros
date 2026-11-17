@@ -2,7 +2,7 @@
  * State definitions per device type (read values, phase 2) and the mapping of read results to states.
  */
 import type { DeviceType } from './devices';
-import { formatMinute, scheduleLevel, scheduleWindows } from './protocol';
+import { formatMinute, scheduleLevel, scheduleWindowList, scheduleWindows } from './protocol';
 import { clockDeviation, type ReadResult } from './reader';
 
 /** One state below devices.<id> */
@@ -58,9 +58,14 @@ export function readStates(type: DeviceType): StateDef[] {
             return [
                 { id: 'clock', common: str('Device clock', 'text') },
                 { id: 'clockDeviation', common: num('Device clock minus local time', 'value', 'min') },
-                { id: 'schedule', common: str('Scheduled on times', 'text') },
+                { id: 'schedule', common: str('Scheduled on times incl. sunrise and sunset', 'text') },
+                { id: 'sunrise', common: num('Sunrise duration (first window)', 'value', 'min') },
+                { id: 'sunset', common: num('Sunset duration (first window)', 'value', 'min') },
                 { id: 'schedulePoints', common: str('Schedule points (JSON)', 'json') },
-                { id: 'scheduledLevel', common: num('Level by schedule now (0-255)', 'value') },
+                {
+                    id: 'scheduledLevel',
+                    common: num('Red by schedule now (0-255; green, blue, white are not reported)', 'value'),
+                },
             ];
         case 'doctor':
             return [{ id: 'waterTemp', common: num('Water temperature', 'value.temperature', '°C') }];
@@ -114,6 +119,11 @@ export function resultToStates(result: ReadResult, now: Date): Record<string, io
         out.clock = formatMinute(clockMinute);
         out.clockDeviation = clockDeviation(clockMinute, now);
         out.schedule = scheduleWindows(points);
+        const first = scheduleWindowList(points)[0];
+        if (first) {
+            out.sunrise = first.sunrise;
+            out.sunset = first.sunset;
+        }
         out.schedulePoints = JSON.stringify(points.map(p => ({ time: formatMinute(p.minute), level: p.level })));
         out.scheduledLevel = scheduleLevel(points, now.getHours() * 60 + now.getMinutes());
     }

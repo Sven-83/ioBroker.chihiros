@@ -22,7 +22,7 @@ Status: early version, **read only**. Controlling the devices follows in the nex
 - Re-subscribes when the proxy stops forwarding advertisements (another API client on the same proxy takes them over since ESPHome 2026.7)
 - **Reads** all reachable devices one after the other in short Bluetooth connections (default every 5 minutes, about 1–2 s per device). Only query commands are sent; the clock of a device is not set and nothing is changed.
   - Dosing pump: dosed ml per pump in total and today
-  - Light: device clock, schedule (on times, points) and the level the schedule gives now
+  - Light: device clock, schedule (on times as in the app, sunrise/sunset duration, points) and the red level the schedule gives now. The light does not report its green, blue and white values; the app keeps them itself.
   - Doctor: water temperature
   - Fan: water and room temperature, humidity
   - CO2 controller: reachable only (it reports no valve state)
@@ -59,7 +59,9 @@ Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY�
 | `devices.<name>.readError` | Error of the last read, empty when it worked ("held by the app/hub?" when the connection was refused) |
 | `devices.<pump>.pumpN.total` / `.today` | Dosing pump: dosed ml of pump N in total / today (today counts scheduled doses only) |
 | `devices.<light>.clock` / `.clockDeviation` | Light: device clock and its difference to local time in minutes (large after a power cut) |
-| `devices.<light>.schedule` / `.schedulePoints` / `.scheduledLevel` | Light: on times, schedule points (JSON) and the level by schedule now |
+| `devices.<light>.schedule` | Light: on times including sunrise and sunset, e.g. `11:00-12:00, 14:00-20:00` |
+| `devices.<light>.sunrise` / `.sunset` | Light: sunrise / sunset duration in minutes (first window) |
+| `devices.<light>.schedulePoints` / `.scheduledLevel` | Light: schedule points (JSON) and the red level by schedule now (green, blue, white are not reported) |
 | `devices.<doctor>.waterTemp` | Doctor: water temperature in °C |
 | `devices.<fan>.waterTemp` / `.roomTemp` / `.humidity` | Fan: water and room temperature in °C, humidity in % |
 
@@ -86,6 +88,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 - (Sven-83) no crash when a closed proxy connection still reports an error (e.g. missing API key)
 - (Sven-83) no "not heard" warnings while the proxy is down or right after (re)connecting
 - (Sven-83) read values of dosing pump, light, Doctor and fan in short GATT sessions (read only)
+- (Sven-83) light: on times including sunrise/sunset as in the app, new states `sunrise`/`sunset`; `scheduledLevel` is the red channel only
 
 ### 0.0.1 (2026-11-17)
 

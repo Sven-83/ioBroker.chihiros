@@ -62,9 +62,14 @@ function readStates(type) {
       return [
         { id: "clock", common: str("Device clock", "text") },
         { id: "clockDeviation", common: num("Device clock minus local time", "value", "min") },
-        { id: "schedule", common: str("Scheduled on times", "text") },
+        { id: "schedule", common: str("Scheduled on times incl. sunrise and sunset", "text") },
+        { id: "sunrise", common: num("Sunrise duration (first window)", "value", "min") },
+        { id: "sunset", common: num("Sunset duration (first window)", "value", "min") },
         { id: "schedulePoints", common: str("Schedule points (JSON)", "json") },
-        { id: "scheduledLevel", common: num("Level by schedule now (0-255)", "value") }
+        {
+          id: "scheduledLevel",
+          common: num("Red by schedule now (0-255; green, blue, white are not reported)", "value")
+        }
       ];
     case "doctor":
       return [{ id: "waterTemp", common: num("Water temperature", "value.temperature", "\xB0C") }];
@@ -105,6 +110,11 @@ function resultToStates(result, now) {
     out.clock = (0, import_protocol.formatMinute)(clockMinute);
     out.clockDeviation = (0, import_reader.clockDeviation)(clockMinute, now);
     out.schedule = (0, import_protocol.scheduleWindows)(points);
+    const first = (0, import_protocol.scheduleWindowList)(points)[0];
+    if (first) {
+      out.sunrise = first.sunrise;
+      out.sunset = first.sunset;
+    }
     out.schedulePoints = JSON.stringify(points.map((p) => ({ time: (0, import_protocol.formatMinute)(p.minute), level: p.level })));
     out.scheduledLevel = (0, import_protocol.scheduleLevel)(points, now.getHours() * 60 + now.getMinutes());
   }

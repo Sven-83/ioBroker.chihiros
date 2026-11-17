@@ -43,7 +43,9 @@ describe('states', () => {
         expect(light).to.deep.equal({
             clock: '14:29',
             clockDeviation: -1,
-            schedule: '14:01-19:59',
+            schedule: '14:00-20:00',
+            sunrise: 1,
+            sunset: 1,
             schedulePoints:
                 '[{"time":"14:00","level":0},{"time":"14:01","level":133},{"time":"19:59","level":133},{"time":"20:00","level":0}]',
             scheduledLevel: 133,

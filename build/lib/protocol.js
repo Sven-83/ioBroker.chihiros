@@ -31,6 +31,7 @@ __export(protocol_exports, {
   encodeFrame: () => encodeFrame,
   formatMinute: () => formatMinute,
   scheduleLevel: () => scheduleLevel,
+  scheduleWindowList: () => scheduleWindowList,
   scheduleWindows: () => scheduleWindows
 });
 module.exports = __toCommonJS(protocol_exports);
@@ -145,26 +146,29 @@ function scheduleLevel(points, minute) {
   }
   return points[points.length - 1].level;
 }
-function scheduleWindows(points) {
+function scheduleWindowList(points) {
   const out = [];
-  let start = null;
-  let last = 0;
-  for (const pt of points) {
-    if (pt.level > 0 && start === null) {
-      start = pt.minute;
+  let i = 0;
+  while (i < points.length) {
+    if (points[i].level === 0) {
+      i++;
+      continue;
     }
-    if (pt.level > 0) {
-      last = pt.minute;
+    const onStart = points[i].minute;
+    const start = i > 0 ? points[i - 1].minute : onStart;
+    let j = i;
+    while (j + 1 < points.length && points[j + 1].level > 0) {
+      j++;
     }
-    if (pt.level === 0 && start !== null) {
-      out.push(`${formatMinute(start)}-${formatMinute(last)}`);
-      start = null;
-    }
+    const onEnd = points[j].minute;
+    const end = j + 1 < points.length ? points[j + 1].minute : onEnd;
+    out.push({ start, end, sunrise: onStart - start, sunset: end - onEnd });
+    i = j + 1;
   }
-  if (start !== null) {
-    out.push(`${formatMinute(start)}-${formatMinute(last)}`);
-  }
-  return out.join(", ");
+  return out;
+}
+function scheduleWindows(points) {
+  return scheduleWindowList(points).map((w) => `${formatMinute(w.start)}-${formatMinute(w.end)}`).join(", ");
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
@@ -181,6 +185,7 @@ function scheduleWindows(points) {
   encodeFrame,
   formatMinute,
   scheduleLevel,
+  scheduleWindowList,
   scheduleWindows
 });
 //# sourceMappingURL=protocol.js.map

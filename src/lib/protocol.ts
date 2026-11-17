@@ -217,29 +217,53 @@ export function scheduleLevel(points: SchedulePoint[], minute: number): number {
     return points[points.length - 1].level;
 }
 
+/** One on window of the schedule, as the app shows it (including sunrise and sunset) */
+export interface ScheduleWindow {
+    /** Start of the sunrise, minutes after midnight */
+    start: number;
+    /** End of the sunset, minutes after midnight */
+    end: number;
+    /** Sunrise duration in minutes */
+    sunrise: number;
+    /** Sunset duration in minutes */
+    sunset: number;
+}
+
 /**
- * Time windows in which the light is on, e.g. "11:01-11:59, 14:01-19:59".
+ * On windows of the schedule. A window runs from the off point before the first on point (start of the sunrise)
+ * to the off point after the last on point (end of the sunset).
+ *
+ * @param points Schedule points, sorted by time
+ */
+export function scheduleWindowList(points: SchedulePoint[]): ScheduleWindow[] {
+    const out: ScheduleWindow[] = [];
+    let i = 0;
+    while (i < points.length) {
+        if (points[i].level === 0) {
+            i++;
+            continue;
+        }
+        const onStart = points[i].minute;
+        const start = i > 0 ? points[i - 1].minute : onStart;
+        let j = i;
+        while (j + 1 < points.length && points[j + 1].level > 0) {
+            j++;
+        }
+        const onEnd = points[j].minute;
+        const end = j + 1 < points.length ? points[j + 1].minute : onEnd;
+        out.push({ start, end, sunrise: onStart - start, sunset: end - onEnd });
+        i = j + 1;
+    }
+    return out;
+}
+
+/**
+ * Time windows in which the light is on as the app shows them, e.g. "11:00-12:00, 14:00-20:00".
  *
  * @param points Schedule points, sorted by time
  */
 export function scheduleWindows(points: SchedulePoint[]): string {
-    const out: string[] = [];
-    let start: number | null = null;
-    let last = 0;
-    for (const pt of points) {
-        if (pt.level > 0 && start === null) {
-            start = pt.minute;
-        }
-        if (pt.level > 0) {
-            last = pt.minute;
-        }
-        if (pt.level === 0 && start !== null) {
-            out.push(`${formatMinute(start)}-${formatMinute(last)}`);
-            start = null;
-        }
-    }
-    if (start !== null) {
-        out.push(`${formatMinute(start)}-${formatMinute(last)}`);
-    }
-    return out.join(', ');
+    return scheduleWindowList(points)
+        .map(w => `${formatMinute(w.start)}-${formatMinute(w.end)}`)
+        .join(', ');
 }

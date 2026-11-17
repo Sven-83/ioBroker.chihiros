@@ -10,6 +10,7 @@ import {
     MessageIds,
     QUERY,
     scheduleLevel,
+    scheduleWindowList,
     scheduleWindows,
 } from './protocol';
 
@@ -97,9 +98,24 @@ describe('protocol', () => {
         });
 
         it('summarises the on windows', () => {
-            expect(scheduleWindows(img.points)).to.equal('11:01-11:59, 14:01-19:59');
+            expect(scheduleWindows(img.points)).to.equal('11:00-12:00, 14:00-20:00');
             expect(scheduleWindows([])).to.equal('');
             expect(scheduleWindows([{ minute: 600, level: 50 }])).to.equal('10:00-10:00');
+        });
+
+        it('reads sunrise and sunset per window', () => {
+            expect(scheduleWindowList(img.points)).to.deep.equal([
+                { start: 660, end: 720, sunrise: 1, sunset: 1 },
+                { start: 840, end: 1200, sunrise: 1, sunset: 1 },
+            ]);
+            // 30 min sunrise, open end
+            expect(
+                scheduleWindowList([
+                    { minute: 600, level: 0 },
+                    { minute: 630, level: 80 },
+                    { minute: 700, level: 120 },
+                ]),
+            ).to.deep.equal([{ start: 600, end: 700, sunrise: 30, sunset: 0 }]);
         });
 
         it('computes the scheduled level including ramps', () => {

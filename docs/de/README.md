@@ -13,7 +13,7 @@ Stand: frühe Version, **nur lesen**. Geräte steuern folgt in den nächsten Ver
 - Neu abonnieren, wenn der Proxy keine Meldungen mehr weiterreicht (seit ESPHome 2026.7 übernimmt ein zweiter API-Client sie)
 - **Werte lesen**: alle erreichbaren Geräte nacheinander in kurzen Bluetooth-Verbindungen (Standard alle 5 Minuten, je Gerät 1–2 s). Es werden nur Abfragen gesendet, keine Uhrzeit gestellt, nichts verändert.
   - Dosierpumpe: dosierte ml je Pumpe gesamt und heute
-  - Licht: Uhr des Geräts, Zeitplan (An-Zeiten, Punkte), Stufe laut Zeitplan jetzt
+  - Licht: Uhr des Geräts, Zeitplan (An-Zeiten wie in der App, Dauer Sonnenaufgang/-untergang, Punkte), Rot laut Zeitplan jetzt. Grün, Blau und Weiß meldet das Licht nicht zurück; die App führt diese Werte selbst.
   - Doctor: Wassertemperatur
   - Lüfter: Wasser- und Raumtemperatur, Luftfeuchte
   - CO2-Steuerung: nur erreichbar (sie meldet keinen Ventilzustand)
