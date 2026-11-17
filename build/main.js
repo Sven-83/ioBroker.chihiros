@@ -24,9 +24,15 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var utils = __toESM(require("@iobroker/adapter-core"));
 var import_esphome_native_api = require("@2colors/esphome-native-api");
 var import_devices = require("./lib/devices");
+var import_gatt = require("./lib/gatt");
+var import_protocol = require("./lib/protocol");
 var import_proxy = require("./lib/proxy");
+var import_reader = require("./lib/reader");
+var import_states = require("./lib/states");
 const EVALUATE_MS = 15e3;
 const RSSI_WRITE_MS = 6e4;
+const FIRST_READ_DELAY_MS = 2e4;
+const SESSION_TIMEOUT_MS = 12e3;
 const TYPE_NAMES = {
   light: "Light",
   doser: "Dosing pump",
@@ -41,6 +47,16 @@ class Chihiros extends utils.Adapter {
   seenMs = 5 * 6e4;
   /** Since when the proxy forwards advertisements, undefined while it is down */
   listeningSince = void 0;
+  pollMs = 5 * 6e4;
+  pollTimer = void 0;
+  polling = false;
+  stopping = false;
+  ids = new import_protocol.MessageIds();
+  scheduler = {
+    setTimeout: (cb, ms) => this.setTimeout(cb, ms),
+    clearTimeout: (h) => this.clearTimeout(h),
+    now: () => Date.now()
+  };
   constructor(options = {}) {
     super({ ...options, name: "chihiros" });
     this.on("ready", this.onReady.bind(this));
@@ -53,6 +69,8 @@ class Chihiros extends utils.Adapter {
     const key = ((_b = this.config.proxyKey) != null ? _b : "").trim();
     const minutes = Number(this.config.seenMinutes);
     this.seenMs = (Number.isFinite(minutes) && minutes >= 1 && minutes <= 60 ? minutes : 5) * 6e4;
+    const poll = Number(this.config.pollMinutes);
+    this.pollMs = (Number.isFinite(poll) && poll >= 1 && poll <= 60 ? poll : 5) * 6e4;
     const { devices, errors } = (0, import_devices.parseDevices)(this.config.devices);
     for (const e of errors) {
       this.log.error(`configuration: ${e}`);
@@ -81,17 +99,14 @@ class Chihiros extends utils.Adapter {
           clientInfo: `ioBroker.chihiros ${(_a2 = this.version) != null ? _a2 : ""}`.trim()
         });
       },
-      {
-        setTimeout: (cb, ms) => this.setTimeout(cb, ms),
-        clearTimeout: (h) => this.clearTimeout(h),
-        now: () => Date.now()
-      },
+      this.scheduler,
       this.log
     );
     this.proxy.on("up", (info) => {
       this.listeningSince = Date.now();
       void this.setState("info.connection", true, true);
       void this.setState("info.proxyVersion", info.version, true);
+      this.schedulePoll(FIRST_READ_DELAY_MS);
     });
     this.proxy.on("down", () => {
       this.listeningSince = void 0;
@@ -181,12 +196,24 @@ class Chihiros extends utils.Adapter {
         },
         native: {}
       });
+      for (const ch of (0, import_states.readChannels)(d.type)) {
+        await this.extendObject(`devices.${d.id}.${ch.id}`, {
+          type: "channel",
+          common: { name: ch.name },
+          native: {}
+        });
+      }
+      for (const st of [...import_states.COMMON_READ_STATES, ...(0, import_states.readStates)(d.type)]) {
+        await this.extendObject(`devices.${d.id}.${st.id}`, { type: "state", common: st.common, native: {} });
+      }
       const lastSeen = await this.getStateAsync(`devices.${d.id}.lastSeen`);
       this.runtime.set(d.macNum, {
         device: d,
         lastSeen: typeof (lastSeen == null ? void 0 : lastSeen.val) === "number" && lastSeen.val > 0 ? lastSeen.val : void 0,
         rssiWritten: 0,
-        bleName: ""
+        bleName: "",
+        addressType: 0,
+        readFailures: 0
       });
       this.log.debug(`device ${d.id}: ${d.type} ${d.mac}${d.seasonal ? " (seasonal)" : ""}`);
     }
@@ -210,6 +237,7 @@ class Chihiros extends utils.Adapter {
     const now = Date.now();
     rt.lastSeen = now;
     rt.rssi = adv.rssi;
+    rt.addressType = adv.addressType;
     if (adv.name && adv.name !== rt.bleName) {
       rt.bleName = adv.name;
       void this.setState(`devices.${rt.device.id}.bleName`, adv.name, true);
@@ -244,9 +272,105 @@ class Chihiros extends utils.Adapter {
       this.log.warn(`evaluate failed: ${e.message}`);
     }
   }
+  schedulePoll(ms) {
+    if (this.stopping) {
+      return;
+    }
+    if (this.pollTimer) {
+      this.clearTimeout(this.pollTimer);
+    }
+    this.pollTimer = this.setTimeout(() => {
+      this.pollTimer = void 0;
+      void this.pollRound();
+    }, ms);
+  }
+  /** Reads all reachable devices one after the other (one GATT connection at a time) */
+  async pollRound() {
+    var _a, _b;
+    if (this.polling) {
+      return;
+    }
+    this.polling = true;
+    try {
+      for (const rt of this.runtime.values()) {
+        if (this.stopping || !((_a = this.proxy) == null ? void 0 : _a.connection)) {
+          break;
+        }
+        if (rt.reachable !== true) {
+          continue;
+        }
+        await this.readDevice(rt);
+      }
+    } catch (e) {
+      this.log.warn(`read round failed: ${e.message}`);
+    } finally {
+      this.polling = false;
+      if ((_b = this.proxy) == null ? void 0 : _b.connection) {
+        this.schedulePoll(this.pollMs);
+      }
+    }
+  }
+  /**
+   * One read session with a device; writes the values or the error.
+   *
+   * @param rt Runtime data of the device
+   */
+  async readDevice(rt) {
+    var _a;
+    const d = rt.device;
+    const conn = (_a = this.proxy) == null ? void 0 : _a.connection;
+    if (!conn) {
+      return;
+    }
+    const plan = (0, import_reader.readPlan)(d.type, this.ids);
+    try {
+      const answers = await (0, import_gatt.runSession)(
+        conn,
+        {
+          address: d.macNum,
+          addressType: rt.addressType,
+          frames: plan.frames,
+          isDone: plan.isDone,
+          timeoutMs: SESSION_TIMEOUT_MS,
+          gapMs: 400,
+          attempts: 2
+        },
+        this.scheduler
+      );
+      if (this.stopping) {
+        return;
+      }
+      const now = /* @__PURE__ */ new Date();
+      const values = (0, import_states.resultToStates)((0, import_reader.interpret)(d.type, answers), now);
+      for (const [id, val] of Object.entries(values)) {
+        await this.setState(`devices.${d.id}.${id}`, val, true);
+      }
+      await this.setState(`devices.${d.id}.lastRead`, now.getTime(), true);
+      await this.setState(`devices.${d.id}.readError`, "", true);
+      if (rt.readFailures > 0) {
+        this.log.info(`${d.name}: read again after ${rt.readFailures} failed attempt(s)`);
+      }
+      rt.readFailures = 0;
+      this.log.debug(`${d.name}: ${JSON.stringify(values)}`);
+    } catch (e) {
+      if (this.stopping) {
+        return;
+      }
+      rt.readFailures++;
+      const busy = e instanceof import_gatt.SessionError && e.busy;
+      const msg = `${e.message}${busy ? " - held by the app/hub?" : ""}`;
+      await this.setState(`devices.${d.id}.readError`, msg, true);
+      const level = rt.readFailures === 1 || rt.readFailures % 12 === 0 ? "warn" : "debug";
+      this.log[level](`${d.name} (${d.mac}): read failed (${rt.readFailures}x): ${msg}`);
+    }
+  }
   onUnload(callback) {
     var _a;
     try {
+      this.stopping = true;
+      if (this.pollTimer) {
+        this.clearTimeout(this.pollTimer);
+      }
       if (this.evaluateTimer) {
         this.clearInterval(this.evaluateTimer);
       }

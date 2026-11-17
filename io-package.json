@@ -87,7 +87,8 @@
         "proxyHost": "",
         "proxyKey": "",
         "devices": [],
-        "seenMinutes": 5
+        "seenMinutes": 5,
+        "pollMinutes": 5
     },
     "encryptedNative": [
         "proxyKey"

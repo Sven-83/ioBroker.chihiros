@@ -20,6 +20,8 @@ declare global {
             }>;
             /** A device counts as missing when it has not been heard for this many minutes */
             seenMinutes: number;
+            /** Read all devices every this many minutes */
+            pollMinutes: number;
         }
     }
 }

@@ -6,6 +6,8 @@
     "proxy_key_help": "Base64-sleutel uit api: encryption: key van de proxy-firmware. Wordt versleuteld opgeslagen.",
     "Missing after (minutes)": "Ontbreekt na (minuten)",
     "seen_minutes_help": "Zo lang mag een apparaat stil zijn voordat het als onbereikbaar geldt.",
+    "Read interval (minutes)": "Leesinterval (minuten)",
+    "poll_minutes_help": "Alle apparaten worden na elkaar via korte Bluetooth-verbindingen gelezen. Zolang de app open is, kan een apparaat niet worden gelezen.",
     "Devices": "Apparaten",
     "devices_hint": "Alleen eigen apparaten invoeren (MAC uit de scan). Een apparaat dat met de app of WiFi-hub verbonden is, zendt niets en geldt als onbereikbaar. Seizoensapparaten geven geen waarschuwing.",
     "Name": "Naam",

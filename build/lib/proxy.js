@@ -46,7 +46,12 @@ function parseAdvertisements(msg) {
     if (!Number.isFinite(address) || address <= 0 || !Number.isFinite(rssi)) {
       continue;
     }
-    out.push({ address, rssi, name: typeof a.name === "string" ? a.name : "" });
+    out.push({
+      address,
+      rssi,
+      name: typeof a.name === "string" ? a.name : "",
+      addressType: Number(a.addressType) || 0
+    });
   }
   return out;
 }
@@ -74,6 +79,10 @@ class ProxyClient extends import_node_events.EventEmitter {
   watchdogTimer = null;
   lastAdvertisement = 0;
   resubscribed = false;
+  /** The API connection while it is up (for GATT sessions), otherwise null */
+  get connection() {
+    return this.up ? this.conn : null;
+  }
   /** True while connected, authorized and subscribed */
   get isUp() {
     return this.up;

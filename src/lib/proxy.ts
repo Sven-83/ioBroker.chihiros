@@ -61,6 +61,8 @@ export interface Advertisement {
     rssi: number;
     /** Local name if present in this packet */
     name: string;
+    /** Address type (0 public, 1 random) as needed for a GATT connection */
+    addressType: number;
 }
 
 const AUTH_TIMEOUT_MS = 20_000;
@@ -97,7 +99,12 @@ export function parseAdvertisements(msg: unknown): Advertisement[] {
         if (!Number.isFinite(address) || address <= 0 || !Number.isFinite(rssi)) {
             continue;
         }
-        out.push({ address, rssi, name: typeof a.name === 'string' ? a.name : '' });
+        out.push({
+            address,
+            rssi,
+            name: typeof a.name === 'string' ? a.name : '',
+            addressType: Number(a.addressType) || 0,
+        });
     }
     return out;
 }
@@ -130,6 +137,11 @@ export class ProxyClient extends EventEmitter {
         private readonly log: ProxyLog,
     ) {
         super();
+    }
+
+    /** The API connection while it is up (for GATT sessions), otherwise null */
+    public get connection(): ApiConnection | null {
+        return this.up ? this.conn : null;
     }
 
     /** True while connected, authorized and subscribed */

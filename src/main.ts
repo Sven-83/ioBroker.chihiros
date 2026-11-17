@@ -1,15 +1,24 @@
 /*
  * ioBroker.chihiros - Chihiros aquarium devices over Bluetooth through an ESPHome Bluetooth proxy.
- * Phase 1: proxy connection and presence of the configured devices (listen only, no GATT connection).
+ * Phase 1: proxy connection and presence of the configured devices.
+ * Phase 2: reads the values of all devices one after the other in short GATT sessions (read only).
  */
 import * as utils from '@iobroker/adapter-core';
 import { Connection } from '@2colors/esphome-native-api';
 import { type Device, decideReachable, parseDevices, presenceLogLevel } from './lib/devices';
-import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient } from './lib/proxy';
+import { type GattApi, runSession, SessionError } from './lib/gatt';
+import { MessageIds } from './lib/protocol';
+import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient, type Scheduler } from './lib/proxy';
+import { interpret, readPlan } from './lib/reader';
+import { COMMON_READ_STATES, readChannels, readStates, resultToStates } from './lib/states';
 
 const EVALUATE_MS = 15_000;
 /** RSSI is written at most this often per device */
 const RSSI_WRITE_MS = 60_000;
+/** First read round after the proxy came up */
+const FIRST_READ_DELAY_MS = 20_000;
+/** Maximum duration of one GATT session after connecting */
+const SESSION_TIMEOUT_MS = 12_000;
 
 const TYPE_NAMES: Record<Device['type'], string> = {
     light: 'Light',
@@ -26,6 +35,9 @@ interface DeviceRuntime {
     rssi?: number;
     rssiWritten: number;
     bleName: string;
+    addressType: number;
+    /** Failed reads in a row */
+    readFailures: number;
 }
 
 class Chihiros extends utils.Adapter {
@@ -35,6 +47,16 @@ class Chihiros extends utils.Adapter {
     private seenMs = 5 * 60_000;
     /** Since when the proxy forwards advertisements, undefined while it is down */
     private listeningSince: number | undefined = undefined;
+    private pollMs = 5 * 60_000;
+    private pollTimer: ioBroker.Timeout | undefined = undefined;
+    private polling = false;
+    private stopping = false;
+    private readonly ids = new MessageIds();
+    private readonly scheduler: Scheduler = {
+        setTimeout: (cb, ms) => this.setTimeout(cb, ms),
+        clearTimeout: h => this.clearTimeout(h as ioBroker.Timeout),
+        now: () => Date.now(),
+    };
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'chihiros' });
@@ -49,6 +71,8 @@ class Chihiros extends utils.Adapter {
         const key = (this.config.proxyKey ?? '').trim();
         const minutes = Number(this.config.seenMinutes);
         this.seenMs = (Number.isFinite(minutes) && minutes >= 1 && minutes <= 60 ? minutes : 5) * 60_000;
+        const poll = Number(this.config.pollMinutes);
+        this.pollMs = (Number.isFinite(poll) && poll >= 1 && poll <= 60 ? poll : 5) * 60_000;
 
         const { devices, errors } = parseDevices(this.config.devices);
         for (const e of errors) {
@@ -78,17 +102,14 @@ class Chihiros extends utils.Adapter {
                     reconnect: false,
                     clientInfo: `ioBroker.chihiros ${this.version ?? ''}`.trim(),
                 }) as unknown as ApiConnection,
-            {
-                setTimeout: (cb, ms) => this.setTimeout(cb, ms),
-                clearTimeout: h => this.clearTimeout(h as ioBroker.Timeout),
-                now: () => Date.now(),
-            },
+            this.scheduler,
             this.log,
         );
         this.proxy.on('up', (info: { name: string; version: string }) => {
             this.listeningSince = Date.now();
             void this.setState('info.connection', true, true);
             void this.setState('info.proxyVersion', info.version, true);
+            this.schedulePoll(FIRST_READ_DELAY_MS);
         });
         this.proxy.on('down', () => {
             this.listeningSince = undefined;
@@ -180,12 +201,24 @@ class Chihiros extends utils.Adapter {
                 },
                 native: {},
             });
+            for (const ch of readChannels(d.type)) {
+                await this.extendObject(`devices.${d.id}.${ch.id}`, {
+                    type: 'channel',
+                    common: { name: ch.name },
+                    native: {},
+                });
+            }
+            for (const st of [...COMMON_READ_STATES, ...readStates(d.type)]) {
+                await this.extendObject(`devices.${d.id}.${st.id}`, { type: 'state', common: st.common, native: {} });
+            }
             const lastSeen = await this.getStateAsync(`devices.${d.id}.lastSeen`);
             this.runtime.set(d.macNum, {
                 device: d,
                 lastSeen: typeof lastSeen?.val === 'number' && lastSeen.val > 0 ? lastSeen.val : undefined,
                 rssiWritten: 0,
                 bleName: '',
+                addressType: 0,
+                readFailures: 0,
             });
             this.log.debug(`device ${d.id}: ${d.type} ${d.mac}${d.seasonal ? ' (seasonal)' : ''}`);
         }
@@ -210,6 +243,7 @@ class Chihiros extends utils.Adapter {
         const now = Date.now();
         rt.lastSeen = now;
         rt.rssi = adv.rssi;
+        rt.addressType = adv.addressType;
         if (adv.name && adv.name !== rt.bleName) {
             rt.bleName = adv.name;
             void this.setState(`devices.${rt.device.id}.bleName`, adv.name, true);
@@ -250,8 +284,107 @@ class Chihiros extends utils.Adapter {
         }
     }
 
+    private schedulePoll(ms: number): void {
+        if (this.stopping) {
+            return;
+        }
+        if (this.pollTimer) {
+            this.clearTimeout(this.pollTimer);
+        }
+        this.pollTimer = this.setTimeout(() => {
+            this.pollTimer = undefined;
+            void this.pollRound();
+        }, ms);
+    }
+
+    /** Reads all reachable devices one after the other (one GATT connection at a time) */
+    private async pollRound(): Promise<void> {
+        if (this.polling) {
+            return;
+        }
+        this.polling = true;
+        try {
+            for (const rt of this.runtime.values()) {
+                if (this.stopping || !this.proxy?.connection) {
+                    break;
+                }
+                // a device that does not advertise is held by the app/hub or has no power: do not even try
+                if (rt.reachable !== true) {
+                    continue;
+                }
+                await this.readDevice(rt);
+            }
+        } catch (e) {
+            this.log.warn(`read round failed: ${(e as Error).message}`);
+        } finally {
+            this.polling = false;
+            if (this.proxy?.connection) {
+                this.schedulePoll(this.pollMs);
+            }
+        }
+    }
+
+    /**
+     * One read session with a device; writes the values or the error.
+     *
+     * @param rt Runtime data of the device
+     */
+    private async readDevice(rt: DeviceRuntime): Promise<void> {
+        const d = rt.device;
+        const conn = this.proxy?.connection;
+        if (!conn) {
+            return;
+        }
+        const plan = readPlan(d.type, this.ids);
+        try {
+            const answers = await runSession(
+                conn as unknown as GattApi,
+                {
+                    address: d.macNum,
+                    addressType: rt.addressType,
+                    frames: plan.frames,
+                    isDone: plan.isDone,
+                    timeoutMs: SESSION_TIMEOUT_MS,
+                    gapMs: 400,
+                    attempts: 2,
+                },
+                this.scheduler,
+            );
+            if (this.stopping) {
+                return;
+            }
+            const now = new Date();
+            const values = resultToStates(interpret(d.type, answers), now);
+            for (const [id, val] of Object.entries(values)) {
+                await this.setState(`devices.${d.id}.${id}`, val, true);
+            }
+            await this.setState(`devices.${d.id}.lastRead`, now.getTime(), true);
+            await this.setState(`devices.${d.id}.readError`, '', true);
+            if (rt.readFailures > 0) {
+                this.log.info(`${d.name}: read again after ${rt.readFailures} failed attempt(s)`);
+            }
+            rt.readFailures = 0;
+            this.log.debug(`${d.name}: ${JSON.stringify(values)}`);
+        } catch (e) {
+            if (this.stopping) {
+                return;
+            }
+            rt.readFailures++;
+            const busy = e instanceof SessionError && e.busy;
+            const msg = `${(e as Error).message}${busy ? ' - held by the app/hub?' : ''}`;
+            await this.setState(`devices.${d.id}.readError`, msg, true);
+            // warn once, then every 12th failure (about once an hour with the default interval)
+            const level = rt.readFailures === 1 || rt.readFailures % 12 === 0 ? 'warn' : 'debug';
+            this.log[level](`${d.name} (${d.mac}): read failed (${rt.readFailures}x): ${msg}`);
+        }
+    }
+
     private onUnload(callback: () => void): void {
         try {
+            this.stopping = true;
+            if (this.pollTimer) {
+                this.clearTimeout(this.pollTimer);
+            }
             if (this.evaluateTimer) {
                 this.clearInterval(this.evaluateTimer);
             }

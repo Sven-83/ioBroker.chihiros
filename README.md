@@ -12,8 +12,7 @@ Connects Chihiros aquarium devices (WRGB II light, dosing pump, CO2 controller, 
 
 German description: [docs/de/README.md](docs/de/README.md)
 
-Status: early version. **Phase 1** – proxy connection and presence of the configured devices (listen only).
-Reading values and controlling the devices follow in the next versions.
+Status: early version, **read only**. Controlling the devices follows in the next versions.
 
 ### What it does (so far)
 
@@ -21,6 +20,12 @@ Reading values and controlling the devices follow in the next versions.
 - Shows per configured device whether it is heard (`reachable`), when (`lastSeen`), signal strength (`rssi`) and its Bluetooth name
 - Warns in the log when a device is missing; **seasonal** devices (e.g. a fan only used in summer) are reported without a warning
 - Re-subscribes when the proxy stops forwarding advertisements (another API client on the same proxy takes them over since ESPHome 2026.7)
+- **Reads** all reachable devices one after the other in short Bluetooth connections (default every 5 minutes, about 1–2 s per device). Only query commands are sent; the clock of a device is not set and nothing is changed.
+  - Dosing pump: dosed ml per pump in total and today
+  - Light: device clock, schedule (on times, points) and the level the schedule gives now
+  - Doctor: water temperature
+  - Fan: water and room temperature, humidity
+  - CO2 controller: reachable only (it reports no valve state)
 
 ### Requirements
 
@@ -35,6 +40,7 @@ Reading values and controlling the devices follow in the next versions.
 | Proxy host or IP | The ESPHome proxy near the aquarium. |
 | API encryption key | `api: encryption: key` of the proxy (base64). Stored encrypted. |
 | Missing after (minutes) | A device counts as not reachable after this silence (default 5). |
+| Read interval (minutes) | All reachable devices are read every this many minutes (default 5). While the app is open, a device cannot be read. |
 | Devices | Name, type (light, dosing pump, CO2 controller, Doctor, fan), MAC address and "seasonal" per device. |
 
 Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY…` (e.g. `DYDOSE…`, `DYNFAN…`).
@@ -49,6 +55,13 @@ Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY�
 | `devices.<name>.lastSeen` | Time of the last advertisement (updated at most once per minute) |
 | `devices.<name>.rssi` | Signal strength in dBm |
 | `devices.<name>.bleName` | Bluetooth name of the device |
+| `devices.<name>.lastRead` | Time of the last successful read |
+| `devices.<name>.readError` | Error of the last read, empty when it worked ("held by the app/hub?" when the connection was refused) |
+| `devices.<pump>.pumpN.total` / `.today` | Dosing pump: dosed ml of pump N in total / today (today counts scheduled doses only) |
+| `devices.<light>.clock` / `.clockDeviation` | Light: device clock and its difference to local time in minutes (large after a power cut) |
+| `devices.<light>.schedule` / `.schedulePoints` / `.scheduledLevel` | Light: on times, schedule points (JSON) and the level by schedule now |
+| `devices.<doctor>.waterTemp` | Doctor: water temperature in °C |
+| `devices.<fan>.waterTemp` / `.roomTemp` / `.humidity` | Fan: water and room temperature in °C, humidity in % |
 
 ### Security
 
@@ -72,6 +85,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 - (Sven-83) proxy connection with backoff and advertisement watchdog, presence per configured device
 - (Sven-83) no crash when a closed proxy connection still reports an error (e.g. missing API key)
 - (Sven-83) no "not heard" warnings while the proxy is down or right after (re)connecting
+- (Sven-83) read values of dosing pump, light, Doctor and fan in short GATT sessions (read only)
 
 ### 0.0.1 (2026-11-17)
 

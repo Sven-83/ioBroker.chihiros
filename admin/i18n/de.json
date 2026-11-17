@@ -6,6 +6,8 @@
     "proxy_key_help": "Base64-Schlüssel aus api: encryption: key der Proxy-Firmware. Wird verschlüsselt gespeichert.",
     "Missing after (minutes)": "Fehlt nach (Minuten)",
     "seen_minutes_help": "So lange darf ein Gerät schweigen, bevor es als nicht erreichbar gilt.",
+    "Read interval (minutes)": "Abfrage-Intervall (Minuten)",
+    "poll_minutes_help": "Alle Geräte werden nacheinander in kurzen Bluetooth-Verbindungen gelesen. Solange die App offen ist, kann ein Gerät nicht gelesen werden.",
     "Devices": "Geräte",
     "devices_hint": "Nur die eigenen Geräte eintragen (MAC aus dem Scan). Ein Gerät, das mit App oder WiFi-Hub verbunden ist, sendet nichts und gilt als nicht erreichbar. Saisonale Geräte (z. B. Lüfter im Sommer) lösen keine Warnung aus.",
     "Name": "Name",

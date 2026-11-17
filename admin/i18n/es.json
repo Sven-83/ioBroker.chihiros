@@ -6,6 +6,8 @@
     "proxy_key_help": "Clave base64 de api: encryption: key del firmware del proxy. Se guarda cifrada.",
     "Missing after (minutes)": "Ausente tras (minutos)",
     "seen_minutes_help": "Tiempo que un dispositivo puede estar en silencio antes de considerarse inaccesible.",
+    "Read interval (minutes)": "Intervalo de lectura (minutos)",
+    "poll_minutes_help": "Todos los dispositivos se leen uno tras otro mediante conexiones Bluetooth breves. Con la app abierta, un dispositivo no se puede leer.",
     "Devices": "Dispositivos",
     "devices_hint": "Introduzca solo sus dispositivos (MAC del escaneo). Un dispositivo conectado a la app o al hub WiFi no emite nada y se considera inaccesible. Los dispositivos estacionales no generan aviso.",
     "Name": "Nombre",

@@ -6,6 +6,8 @@
     "proxy_key_help": "Chave base64 de api: encryption: key do firmware do proxy. Guardada encriptada.",
     "Missing after (minutes)": "Ausente após (minutos)",
     "seen_minutes_help": "Tempo que um dispositivo pode ficar em silêncio antes de ser considerado inacessível.",
+    "Read interval (minutes)": "Intervalo de leitura (minutos)",
+    "poll_minutes_help": "Todos os dispositivos são lidos um após o outro em ligações Bluetooth curtas. Com a app aberta, um dispositivo não pode ser lido.",
     "Devices": "Dispositivos",
     "devices_hint": "Introduza apenas os seus dispositivos (MAC do scan). Um dispositivo ligado à app ou ao hub WiFi não emite nada e é considerado inacessível. Dispositivos sazonais não geram aviso.",
     "Name": "Nome",

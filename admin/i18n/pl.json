@@ -6,6 +6,8 @@
     "proxy_key_help": "Klucz base64 z api: encryption: key firmware proxy. Przechowywany w postaci zaszyfrowanej.",
     "Missing after (minutes)": "Brak po (minutach)",
     "seen_minutes_help": "Jak długo urządzenie może milczeć, zanim zostanie uznane za niedostępne.",
+    "Read interval (minutes)": "Interwał odczytu (minuty)",
+    "poll_minutes_help": "Wszystkie urządzenia są odczytywane kolejno w krótkich połączeniach Bluetooth. Gdy aplikacja jest otwarta, urządzenia nie można odczytać.",
     "Devices": "Urządzenia",
     "devices_hint": "Wpisz tylko własne urządzenia (MAC ze skanu). Urządzenie połączone z aplikacją lub hubem WiFi nic nie nadaje i jest uznawane za niedostępne. Urządzenia sezonowe nie wywołują ostrzeżeń.",
     "Name": "Nazwa",

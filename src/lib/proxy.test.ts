@@ -101,8 +101,8 @@ describe('proxy', () => {
             ],
         });
         expect(list).to.deep.equal([
-            { address: 0x0a1b2c3d4e01, rssi: -63, name: 'DYNFAN' },
-            { address: 0x0a1b2c3d4e02, rssi: -47, name: '' },
+            { address: 0x0a1b2c3d4e01, rssi: -63, name: 'DYNFAN', addressType: 0 },
+            { address: 0x0a1b2c3d4e02, rssi: -47, name: '', addressType: 0 },
         ]);
     });
 
