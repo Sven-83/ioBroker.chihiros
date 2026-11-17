@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import {
+    decideReachable,
     isReachable,
     macToNumber,
     normalizeMac,
@@ -88,6 +89,28 @@ describe('devices', () => {
         expect(isReachable(800, 1000, 300)).to.equal(true);
         expect(isReachable(700, 1000, 300)).to.equal(true);
         expect(isReachable(699, 1000, 300)).to.equal(false);
+    });
+
+    describe('decideReachable', () => {
+        const T = 300;
+        it('keeps the previous value while the proxy is down', () => {
+            expect(decideReachable(undefined, 10_000, T, undefined, undefined)).to.equal(undefined);
+            expect(decideReachable(100, 10_000, T, undefined, true)).to.equal(true);
+        });
+        it('does not report a device missing right after (re)connecting', () => {
+            // started at 1000, never heard yet: undecided during the first timeout
+            expect(decideReachable(undefined, 1200, T, 1000, undefined)).to.equal(undefined);
+            // proxy was down for long, device was reachable before: keep it during the grace time
+            expect(decideReachable(100, 1200, T, 1000, true)).to.equal(true);
+        });
+        it('decides after the grace time', () => {
+            expect(decideReachable(undefined, 1300, T, 1000, undefined)).to.equal(false);
+            expect(decideReachable(100, 1300, T, 1000, true)).to.equal(false);
+        });
+        it('reports a heard device at once', () => {
+            expect(decideReachable(1100, 1200, T, 1000, undefined)).to.equal(true);
+            expect(decideReachable(1100, 1200, T, 1000, false)).to.equal(true);
+        });
     });
 
     it('warns only for missing devices that are not seasonal', () => {

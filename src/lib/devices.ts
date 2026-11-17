@@ -143,6 +143,34 @@ export function isReachable(lastSeen: number | undefined, now: number, timeoutMs
 }
 
 /**
+ * Decides the reachable flag. Without a working proxy, and during the first timeout after (re)connecting,
+ * a silent device keeps its previous value: missing advertisements then say nothing about the device.
+ *
+ * @param lastSeen Time of the last advertisement in ms, undefined = never
+ * @param now Current time in ms
+ * @param timeoutMs Allowed silence in ms
+ * @param listeningSince Time since when the proxy forwards advertisements, undefined = proxy down
+ * @param previous Current value, undefined = not decided yet
+ * @returns the new value, undefined = still not decided
+ */
+export function decideReachable(
+    lastSeen: number | undefined,
+    now: number,
+    timeoutMs: number,
+    listeningSince: number | undefined,
+    previous: boolean | undefined,
+): boolean | undefined {
+    if (listeningSince === undefined) {
+        return previous;
+    }
+    const reachable = isReachable(lastSeen, now, timeoutMs);
+    if (!reachable && now - listeningSince < timeoutMs) {
+        return previous;
+    }
+    return reachable;
+}
+
+/**
  * Log level for a change of the reachable flag: missing devices warn, seasonal ones only inform.
  *
  * @param device The device

@@ -39,7 +39,8 @@ class Chihiros extends utils.Adapter {
   runtime = /* @__PURE__ */ new Map();
   evaluateTimer = void 0;
   seenMs = 5 * 6e4;
-  proxyUp = false;
+  /** Since when the proxy forwards advertisements, undefined while it is down */
+  listeningSince = void 0;
   constructor(options = {}) {
     super({ ...options, name: "chihiros" });
     this.on("ready", this.onReady.bind(this));
@@ -88,12 +89,12 @@ class Chihiros extends utils.Adapter {
       this.log
     );
     this.proxy.on("up", (info) => {
-      this.proxyUp = true;
+      this.listeningSince = Date.now();
       void this.setState("info.connection", true, true);
       void this.setState("info.proxyVersion", info.version, true);
     });
     this.proxy.on("down", () => {
-      this.proxyUp = false;
+      this.listeningSince = void 0;
       void this.setState("info.connection", false, true);
     });
     this.proxy.on("advertisement", (adv) => this.onAdvertisement(adv));
@@ -223,11 +224,8 @@ class Chihiros extends utils.Adapter {
     try {
       for (const rt of this.runtime.values()) {
         const d = rt.device;
-        if (!this.proxyUp && rt.reachable !== void 0) {
-          continue;
-        }
-        const reachable = (0, import_devices.isReachable)(rt.lastSeen, now, this.seenMs);
-        if (reachable !== rt.reachable) {
+        const reachable = (0, import_devices.decideReachable)(rt.lastSeen, now, this.seenMs, this.listeningSince, rt.reachable);
+        if (reachable !== void 0 && reachable !== rt.reachable) {
           const first = rt.reachable === void 0;
           rt.reachable = reachable;
           await this.setState(`devices.${d.id}.reachable`, reachable, true);

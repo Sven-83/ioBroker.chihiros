@@ -71,6 +71,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 
 - (Sven-83) proxy connection with backoff and advertisement watchdog, presence per configured device
 - (Sven-83) no crash when a closed proxy connection still reports an error (e.g. missing API key)
+- (Sven-83) no "not heard" warnings while the proxy is down or right after (re)connecting
 
 ### 0.0.1 (2026-11-17)
 

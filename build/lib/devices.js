@@ -19,6 +19,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var devices_exports = {};
 __export(devices_exports, {
   DEVICE_TYPES: () => DEVICE_TYPES,
+  decideReachable: () => decideReachable,
   isReachable: () => isReachable,
   macToNumber: () => macToNumber,
   normalizeMac: () => normalizeMac,
@@ -88,12 +89,23 @@ function parseDevices(raw) {
 function isReachable(lastSeen, now, timeoutMs) {
   return lastSeen !== void 0 && now - lastSeen <= timeoutMs;
 }
+function decideReachable(lastSeen, now, timeoutMs, listeningSince, previous) {
+  if (listeningSince === void 0) {
+    return previous;
+  }
+  const reachable = isReachable(lastSeen, now, timeoutMs);
+  if (!reachable && now - listeningSince < timeoutMs) {
+    return previous;
+  }
+  return reachable;
+}
 function presenceLogLevel(device, reachable) {
   return reachable || device.seasonal ? "info" : "warn";
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   DEVICE_TYPES,
+  decideReachable,
   isReachable,
   macToNumber,
   normalizeMac,

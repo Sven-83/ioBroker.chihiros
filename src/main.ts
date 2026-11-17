@@ -4,7 +4,7 @@
  */
 import * as utils from '@iobroker/adapter-core';
 import { Connection } from '@2colors/esphome-native-api';
-import { type Device, isReachable, parseDevices, presenceLogLevel } from './lib/devices';
+import { type Device, decideReachable, parseDevices, presenceLogLevel } from './lib/devices';
 import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient } from './lib/proxy';
 
 const EVALUATE_MS = 15_000;
@@ -33,7 +33,8 @@ class Chihiros extends utils.Adapter {
     private readonly runtime = new Map<number, DeviceRuntime>();
     private evaluateTimer: ioBroker.Interval | undefined = undefined;
     private seenMs = 5 * 60_000;
-    private proxyUp = false;
+    /** Since when the proxy forwards advertisements, undefined while it is down */
+    private listeningSince: number | undefined = undefined;
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'chihiros' });
@@ -85,12 +86,12 @@ class Chihiros extends utils.Adapter {
             this.log,
         );
         this.proxy.on('up', (info: { name: string; version: string }) => {
-            this.proxyUp = true;
+            this.listeningSince = Date.now();
             void this.setState('info.connection', true, true);
             void this.setState('info.proxyVersion', info.version, true);
         });
         this.proxy.on('down', () => {
-            this.proxyUp = false;
+            this.listeningSince = undefined;
             void this.setState('info.connection', false, true);
         });
         this.proxy.on('advertisement', (adv: Advertisement) => this.onAdvertisement(adv));
@@ -224,12 +225,8 @@ class Chihiros extends utils.Adapter {
         try {
             for (const rt of this.runtime.values()) {
                 const d = rt.device;
-                // without a working proxy we know nothing: keep the last value instead of reporting all devices gone
-                if (!this.proxyUp && rt.reachable !== undefined) {
-                    continue;
-                }
-                const reachable = isReachable(rt.lastSeen, now, this.seenMs);
-                if (reachable !== rt.reachable) {
+                const reachable = decideReachable(rt.lastSeen, now, this.seenMs, this.listeningSince, rt.reachable);
+                if (reachable !== undefined && reachable !== rt.reachable) {
                     const first = rt.reachable === undefined;
                     rt.reachable = reachable;
                     await this.setState(`devices.${d.id}.reachable`, reachable, true);
