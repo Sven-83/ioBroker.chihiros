@@ -12,9 +12,6 @@ export const POWER_ON_W: Partial<Record<DeviceType, number>> = { fan: 0.5, co2: 
 /** Power up to which a device counts as off, in W */
 export const POWER_OFF_W = 0.2;
 
-/** A power value older than this is not used to confirm a command */
-export const POWER_MAX_AGE_MS = 60_000;
-
 /** Fan: levels sent to get a fan running that does not start (Sven 17.11.2026: up, down, then the wanted level) */
 export const FAN_KICK_LEVELS = [11, 4] as const;
 

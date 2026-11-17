@@ -643,7 +643,8 @@ class Chihiros extends utils.Adapter {
     }
   }
   /**
-   * Current power of a device, null when unknown or older than {@link POWER_MAX_AGE_MS}.
+   * Last reported power of a device, null when unknown. Its age is not checked: plugs like the Shelly report
+   * a value only when it changes, so 0 W can be hours old and still valid.
    *
    * @param rt Runtime data of the device
    */
@@ -652,7 +653,7 @@ class Chihiros extends utils.Adapter {
       return null;
     }
     const st = await this.getForeignStateAsync(rt.device.powerState);
-    if (!st || typeof st.val !== "number" || Date.now() - st.ts > import_power.POWER_MAX_AGE_MS) {
+    if (!st || typeof st.val !== "number") {
       return null;
     }
     return st.val;

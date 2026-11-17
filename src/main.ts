@@ -21,7 +21,7 @@ import {
     RESULT_UNCONFIRMED,
     writeStates,
 } from './lib/commands';
-import { FAN_KICK_LEVELS, isOn, POWER_MAX_AGE_MS, POWER_OFF_W, powerIndicator } from './lib/power';
+import { FAN_KICK_LEVELS, isOn, POWER_OFF_W, powerIndicator } from './lib/power';
 import { encodeFrame, MessageIds, MSG, QUERY } from './lib/protocol';
 import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient, type Scheduler } from './lib/proxy';
 import { clockDeviation, interpret, readPlan } from './lib/reader';
@@ -704,7 +704,8 @@ class Chihiros extends utils.Adapter {
     }
 
     /**
-     * Current power of a device, null when unknown or older than {@link POWER_MAX_AGE_MS}.
+     * Last reported power of a device, null when unknown. Its age is not checked: plugs like the Shelly report
+     * a value only when it changes, so 0 W can be hours old and still valid.
      *
      * @param rt Runtime data of the device
      */
@@ -713,7 +714,7 @@ class Chihiros extends utils.Adapter {
             return null;
         }
         const st = await this.getForeignStateAsync(rt.device.powerState);
-        if (!st || typeof st.val !== 'number' || Date.now() - st.ts > POWER_MAX_AGE_MS) {
+        if (!st || typeof st.val !== 'number') {
             return null;
         }
         return st.val;

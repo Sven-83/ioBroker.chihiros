@@ -19,7 +19,6 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var power_exports = {};
 __export(power_exports, {
   FAN_KICK_LEVELS: () => FAN_KICK_LEVELS,
-  POWER_MAX_AGE_MS: () => POWER_MAX_AGE_MS,
   POWER_OFF_W: () => POWER_OFF_W,
   POWER_ON_W: () => POWER_ON_W,
   isOn: () => isOn,
@@ -29,7 +28,6 @@ __export(power_exports, {
 module.exports = __toCommonJS(power_exports);
 const POWER_ON_W = { fan: 0.5, co2: 1 };
 const POWER_OFF_W = 0.2;
-const POWER_MAX_AGE_MS = 6e4;
 const FAN_KICK_LEVELS = [11, 4];
 function powerIndicator(type) {
   switch (type) {
@@ -76,7 +74,6 @@ function parsePowerState(raw) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   FAN_KICK_LEVELS,
-  POWER_MAX_AGE_MS,
   POWER_OFF_W,
   POWER_ON_W,
   isOn,
