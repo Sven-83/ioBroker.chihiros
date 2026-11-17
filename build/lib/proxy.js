@@ -105,10 +105,10 @@ class ProxyClient extends import_node_events.EventEmitter {
     if (conn) {
       try {
         conn.removeAllListeners();
-        conn.on("error", () => void 0);
         conn.disconnect();
       } catch {
       }
+      conn.on("error", () => void 0);
     }
     if (this.up) {
       this.up = false;

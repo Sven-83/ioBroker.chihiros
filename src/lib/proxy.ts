@@ -167,12 +167,13 @@ export class ProxyClient extends EventEmitter {
         if (conn) {
             try {
                 conn.removeAllListeners();
-                // the library emits 'error' on a failed disconnect; keep a listener so it is not thrown
-                conn.on('error', () => undefined);
                 conn.disconnect();
             } catch {
                 // already closed
             }
+            // disconnect() of the library removes all listeners, but a pending handshake can still fail later
+            // and emit 'error' - without a listener that error would be thrown and crash the adapter
+            conn.on('error', () => undefined);
         }
         if (this.up) {
             this.up = false;

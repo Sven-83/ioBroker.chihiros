@@ -18,6 +18,8 @@ class FakeConnection extends EventEmitter implements ApiConnection {
     }
     public disconnect(): void {
         this.disconnects++;
+        // like the library: disconnect() drops every listener
+        this.removeAllListeners();
     }
     public deviceInfoService(): Promise<{ name: string; esphomeVersion: string }> {
         return Promise.resolve({ name: 'proxy-1', esphomeVersion: '2026.10.2' });
@@ -179,6 +181,15 @@ describe('proxy', () => {
         }
         expect(conns[0].subscribes).to.equal(1);
         expect(events).to.deep.equal(['up']);
+        client.stop();
+    });
+
+    it('survives an error of a connection that was already closed', () => {
+        const { conns, client } = setup();
+        client.start();
+        conns[0].emit('error', new Error('Bad format: Encryption expected'));
+        // the pending handshake of the library fails a few seconds later
+        expect(() => conns[0].emit('error', new Error('sendMessage timeout waiting for HelloResponse'))).not.to.throw();
         client.stop();
     });
 

@@ -70,6 +70,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 ### **WORK IN PROGRESS**
 
 - (Sven-83) proxy connection with backoff and advertisement watchdog, presence per configured device
+- (Sven-83) no crash when a closed proxy connection still reports an error (e.g. missing API key)
 
 ### 0.0.1 (2026-11-17)
 
