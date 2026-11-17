@@ -12,8 +12,8 @@ export const MODE_CLOCK = 0x09;
 /** Mode byte: set one channel of the light, params [channel, value 0-255] */
 export const MODE_CHANNEL = 0x07;
 
-/** Mode byte (a5 family): manual dose, params [pump index 0-3, 0, 0, 0, ml x 10]; write test 16.11.2026 (0.2 ml) */
-export const MODE_DOSE = 0x27;
+/** Mode byte (a5 family): manual dose 0x1b (= 27 decimal), params [pump index 0-3, 0, 0, 0, ml x 10]; write test 16.11.2026 (0.2 ml) */
+export const MODE_DOSE = 0x1b;
 /** Largest manual dose per command in ml (safety limit, Sven 17.11.2026) */
 export const MAX_DOSE_ML = 5;
 
@@ -111,7 +111,7 @@ export function writeStates(type: DeviceType): StateDef[] {
                     type: 'number',
                     role: 'level',
                     unit: 'ml',
-                    min: 0.1,
+                    min: 0,
                     max: MAX_DOSE_ML,
                     step: 0.1,
                     read: true,

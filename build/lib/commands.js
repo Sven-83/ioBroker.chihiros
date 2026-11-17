@@ -37,7 +37,7 @@ var import_protocol = require("./protocol");
 var import_states = require("./states");
 const MODE_CLOCK = 9;
 const MODE_CHANNEL = 7;
-const MODE_DOSE = 39;
+const MODE_DOSE = 27;
 const MAX_DOSE_ML = 5;
 const LIGHT_CHANNELS = ["red", "green", "blue", "white"];
 const RESULT_UNCONFIRMED = "sent, not confirmed (the device does not report this value)";
@@ -103,7 +103,7 @@ function writeStates(type) {
           type: "number",
           role: "level",
           unit: "ml",
-          min: 0.1,
+          min: 0,
           max: MAX_DOSE_ML,
           step: 0.1,
           read: true,

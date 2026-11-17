@@ -84,14 +84,14 @@ describe('commands', () => {
     });
 
     it('builds the manual dose like the write test', () => {
-        // write test 16.11.2026: pump 2, 0.2 ml = a5/27 [01 00 00 00 02]
+        // write test 16.11.2026: pump 2, 0.2 ml = a5/1b (27 decimal) [01 00 00 00 02]
         expect(doserCommand('pump2.doseNow', 0.2)).to.deep.equal({
             label: 'pump 2: dose 0.2 ml',
-            frames: [[0xa5, 0x27, [1, 0, 0, 0, 2]]],
+            frames: [[0xa5, 0x1b, [1, 0, 0, 0, 2]]],
             states: { 'pump2.doseNow': 0.2 },
             confirm: { pump: 2, ml: 0.2 },
         });
-        expect(doserCommand('pump3.doseNow', '5').frames).to.deep.equal([[0xa5, 0x27, [2, 0, 0, 0, 50]]]);
+        expect(doserCommand('pump3.doseNow', '5').frames).to.deep.equal([[0xa5, 0x1b, [2, 0, 0, 0, 50]]]);
         expect(doserCommand('pump1.doseNow', 1.04).confirm).to.deep.equal({ pump: 1, ml: 1 });
     });
 
