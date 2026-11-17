@@ -17,6 +17,8 @@ declare global {
                 mac: string;
                 /** Only in use part of the year (e.g. the fan in summer): no warning when it is missing */
                 seasonal: boolean;
+                /** Optional state with the power in W (e.g. Shelly plug), only read */
+                powerState?: string;
             }>;
             /** A device counts as missing when it has not been heard for this many minutes */
             seenMinutes: number;

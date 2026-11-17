@@ -2,6 +2,7 @@
  * Device list from the instance configuration: validation, object IDs, presence.
  * Pure functions only, so everything here is unit tested.
  */
+import { parsePowerState } from './power';
 
 /** Supported Chihiros device types */
 export const DEVICE_TYPES = ['light', 'doser', 'co2', 'doctor', 'fan'] as const;
@@ -23,6 +24,8 @@ export interface Device {
     macNum: number;
     /** Only in use part of the year: no warning when missing */
     seasonal: boolean;
+    /** Optional foreign state with the power of the device in W (e.g. a Shelly plug), only read */
+    powerState?: string;
 }
 
 /** Result of {@link parseDevices} */
@@ -126,7 +129,17 @@ export function parseDevices(raw: unknown): ParseResult {
         }
         macs.add(mac);
         ids.add(id);
-        devices.push({ id, name, type, mac, macNum: macToNumber(mac), seasonal: r.seasonal === true });
+        const device: Device = { id, name, type, mac, macNum: macToNumber(mac), seasonal: r.seasonal === true };
+        const rawPower = typeof r.powerState === 'string' ? r.powerState.trim() : '';
+        if (rawPower) {
+            const power = parsePowerState(rawPower);
+            if (power) {
+                device.powerState = power;
+            } else {
+                errors.push(`${line}: invalid power state ID "${rawPower}" - ignored`);
+            }
+        }
+        devices.push(device);
     });
     return { devices, errors };
 }

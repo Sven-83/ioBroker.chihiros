@@ -21,6 +21,7 @@ import {
     RESULT_UNCONFIRMED,
     writeStates,
 } from './lib/commands';
+import { FAN_KICK_LEVELS, isOn, POWER_MAX_AGE_MS, POWER_OFF_W, powerIndicator } from './lib/power';
 import { encodeFrame, MessageIds, MSG, QUERY } from './lib/protocol';
 import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient, type Scheduler } from './lib/proxy';
 import { clockDeviation, interpret, readPlan } from './lib/reader';
@@ -42,6 +43,10 @@ const DOSE_CONFIRM_DELAY_MS = 15_000;
 const DOSE_MS_PER_ML = 6_000;
 /** Second counter check */
 const DOSE_CONFIRM_RETRY_MS = 30_000;
+/** Fan: power check after a level command and after the kick */
+const FAN_CHECK_DELAY_MS = 10_000;
+/** Fan: pause between the kick levels */
+const FAN_KICK_GAP_MS = 1_500;
 
 const TYPE_NAMES: Record<Device['type'], string> = {
     light: 'Light',
@@ -69,6 +74,10 @@ interface DeviceRuntime {
     clockReason: string;
     /** Last set values of the writable states */
     values: Record<string, ioBroker.StateValue>;
+    /** Last measured on state (power state), undefined = unknown */
+    powerOn?: boolean;
+    /** Counts the commands; a running confirmation stops when a newer command came */
+    commandSeq: number;
 }
 
 class Chihiros extends utils.Adapter {
@@ -86,6 +95,8 @@ class Chihiros extends utils.Adapter {
     private clockSync = true;
     /** Serialises all GATT sessions (the proxy and the devices handle one connection at a time) */
     private gattChain: Promise<void> = Promise.resolve();
+    /** Power state ID -> device */
+    private readonly powerStates = new Map<string, DeviceRuntime>();
     private readonly scheduler: Scheduler = {
         setTimeout: (cb, ms) => this.setTimeout(cb, ms),
         clearTimeout: h => this.clearTimeout(h as ioBroker.Timeout),
@@ -116,6 +127,14 @@ class Chihiros extends utils.Adapter {
         }
         await this.syncDeviceObjects(devices);
         await this.subscribeStatesAsync('devices.*');
+        for (const rt of this.runtime.values()) {
+            const id = rt.device.powerState;
+            if (id && powerIndicator(rt.device.type)) {
+                this.powerStates.set(id, rt);
+                await this.subscribeForeignStatesAsync(id);
+                await this.onPower(rt, await this.getForeignStateAsync(id));
+            }
+        }
 
         if (!host) {
             this.log.error('configuration: no ESPHome Bluetooth proxy is configured');
@@ -270,7 +289,18 @@ class Chihiros extends utils.Adapter {
                 clockSetAt: 0,
                 clockReason: '',
                 values,
+                commandSeq: 0,
             });
+            const indicator = powerIndicator(d.type);
+            if (indicator && d.powerState) {
+                await this.extendObject(`devices.${d.id}.${indicator.id}`, {
+                    type: 'state',
+                    common: indicator.common,
+                    native: {},
+                });
+            } else if (indicator && (await this.getObjectAsync(`devices.${d.id}.${indicator.id}`))) {
+                await this.delObjectAsync(`devices.${d.id}.${indicator.id}`);
+            }
             this.log.debug(`device ${d.id}: ${d.type} ${d.mac}${d.seasonal ? ' (seasonal)' : ''}`);
         }
         const existing = await this.getObjectViewAsync('system', 'device', {
@@ -504,6 +534,11 @@ class Chihiros extends utils.Adapter {
      * @param state New state
      */
     private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
+        const powerOf = this.powerStates.get(id);
+        if (powerOf) {
+            void this.onPower(powerOf, state);
+            return;
+        }
         if (!state || state.ack || this.stopping) {
             return;
         }
@@ -562,6 +597,7 @@ class Chihiros extends utils.Adapter {
     private async runCommand(rt: DeviceRuntime, stateId: string, value: ioBroker.StateValue): Promise<void> {
         const d = rt.device;
         const base = `devices.${d.id}`;
+        const seq = ++rt.commandSeq;
         let plan: CommandPlan | undefined;
         try {
             plan = this.buildPlan(rt, stateId, value);
@@ -588,6 +624,9 @@ class Chihiros extends utils.Adapter {
             if (confirm) {
                 await this.setState(`${base}.commandResult`, 'sent, waiting for the pump counter', true);
                 void this.confirmDose(rt, confirm, before);
+            } else if (d.type === 'fan' && d.powerState && typeof plan.states.level === 'number') {
+                await this.setState(`${base}.commandResult`, 'sent, checking the power', true);
+                void this.confirmFan(rt, plan.states.level, seq);
             } else {
                 await this.setState(`${base}.commandResult`, acked ? RESULT_UNCONFIRMED : RESULT_UNACKED, true);
             }
@@ -645,13 +684,111 @@ class Chihiros extends utils.Adapter {
     }
 
     /**
+     * Updates the on state of a device from its power state.
+     *
+     * @param rt Runtime data of the device
+     * @param state Power state
+     */
+    private async onPower(rt: DeviceRuntime, state: ioBroker.State | null | undefined): Promise<void> {
+        const indicator = powerIndicator(rt.device.type);
+        const on = indicator ? isOn(rt.device.type, state?.val) : null;
+        if (!indicator || on === null || on === rt.powerOn || this.stopping) {
+            return;
+        }
+        rt.powerOn = on;
+        try {
+            await this.setState(`devices.${rt.device.id}.${indicator.id}`, on, true);
+        } catch (e) {
+            this.log.debug(`${rt.device.name}: power state not written: ${(e as Error).message}`);
+        }
+    }
+
+    /**
+     * Current power of a device, null when unknown or older than {@link POWER_MAX_AGE_MS}.
+     *
+     * @param rt Runtime data of the device
+     */
+    private async currentPower(rt: DeviceRuntime): Promise<number | null> {
+        if (!rt.device.powerState) {
+            return null;
+        }
+        const st = await this.getForeignStateAsync(rt.device.powerState);
+        if (!st || typeof st.val !== 'number' || Date.now() - st.ts > POWER_MAX_AGE_MS) {
+            return null;
+        }
+        return st.val;
+    }
+
+    /**
+     * Fan: checks by the power whether a level command worked; if the fan does not start, kicks it
+     * (up, down, wanted level - like in the app) and checks again.
+     *
+     * @param rt Runtime data of the fan
+     * @param level Level that was sent
+     * @param seq Command number; stops when a newer command came
+     */
+    private async confirmFan(rt: DeviceRuntime, level: number, seq: number): Promise<void> {
+        const base = `devices.${rt.device.id}`;
+        const name = rt.device.name;
+        const stale = (): boolean => this.stopping || seq !== rt.commandSeq;
+        const result = async (text: string, level2: 'info' | 'warn' | 'debug' = 'debug'): Promise<void> => {
+            await this.setState(`${base}.commandResult`, text, true);
+            this.log[level2](`${name}: ${text}`);
+        };
+        const measure = async (): Promise<number | null> => {
+            await new Promise<void>(r => this.scheduler.setTimeout(r, FAN_CHECK_DELAY_MS));
+            return stale() ? null : this.currentPower(rt);
+        };
+        try {
+            let w = await measure();
+            if (stale()) {
+                return;
+            }
+            if (w === null) {
+                await result('sent, not confirmed (no current power value)');
+                return;
+            }
+            if (level === 0) {
+                if (w <= POWER_OFF_W) {
+                    await result(`confirmed: off (${w} W)`);
+                } else {
+                    await result(`not confirmed: still ${w} W after "off" - please check the fan`, 'warn');
+                }
+                return;
+            }
+            if (isOn('fan', w)) {
+                await result(`confirmed: running (${w} W)`);
+                return;
+            }
+            const kick = [...FAN_KICK_LEVELS, level];
+            await result(`not running after level ${level} (${w} W) - kicking ${kick.join(' -> ')}`, 'info');
+            const frames = kick.map(l => fanCommand('level', l).frames[0]);
+            await this.withGatt(() => this.sendCommand(rt, frames, FAN_KICK_GAP_MS));
+            w = await measure();
+            if (stale()) {
+                return;
+            }
+            if (w !== null && isOn('fan', w)) {
+                await result(`confirmed after kick: running (${w} W)`, 'info');
+            } else {
+                await result(`not running after kick (${w ?? '?'} W) - please check the fan`, 'warn');
+            }
+        } catch (e) {
+            if (!stale()) {
+                await result(`error while checking: ${(e as Error).message}`, 'warn');
+            }
+        }
+    }
+
+    /**
      * One command session: login, clock (like the app), command frames, disconnect.
      *
      * @param rt Runtime data of the device
      * @param frames Command frames
+     * @param gapMs Pause between the frames
      * @returns false when the device did not acknowledge a command frame
      */
-    private async sendCommand(rt: DeviceRuntime, frames: RawFrame[]): Promise<boolean> {
+    private async sendCommand(rt: DeviceRuntime, frames: RawFrame[], gapMs = 400): Promise<boolean> {
         const conn = this.proxy?.connection;
         if (!conn || this.stopping) {
             throw new CommandError('proxy not connected');
@@ -665,8 +802,8 @@ class Chihiros extends utils.Adapter {
                 addressType: rt.addressType,
                 frames: [this.encode(QUERY.status), this.encode(clockFrame(now)), ...frames.map(f => this.encode(f))],
                 isDone: a => a.some(x => x.type === MSG.info),
-                timeoutMs: SESSION_TIMEOUT_MS,
-                gapMs: 400,
+                timeoutMs: SESSION_TIMEOUT_MS + frames.length * gapMs,
+                gapMs,
                 attempts: 2,
                 // login and clock must be acknowledged, the command frames themselves not always
                 tolerateFrom: 2,

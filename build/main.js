@@ -26,6 +26,7 @@ var import_esphome_native_api = require("@2colors/esphome-native-api");
 var import_devices = require("./lib/devices");
 var import_gatt = require("./lib/gatt");
 var import_commands = require("./lib/commands");
+var import_power = require("./lib/power");
 var import_protocol = require("./lib/protocol");
 var import_proxy = require("./lib/proxy");
 var import_reader = require("./lib/reader");
@@ -39,6 +40,8 @@ const CLOCK_REFRESH_MS = 24 * 36e5;
 const DOSE_CONFIRM_DELAY_MS = 15e3;
 const DOSE_MS_PER_ML = 6e3;
 const DOSE_CONFIRM_RETRY_MS = 3e4;
+const FAN_CHECK_DELAY_MS = 1e4;
+const FAN_KICK_GAP_MS = 1500;
 const TYPE_NAMES = {
   light: "Light",
   doser: "Dosing pump",
@@ -61,6 +64,8 @@ class Chihiros extends utils.Adapter {
   clockSync = true;
   /** Serialises all GATT sessions (the proxy and the devices handle one connection at a time) */
   gattChain = Promise.resolve();
+  /** Power state ID -> device */
+  powerStates = /* @__PURE__ */ new Map();
   scheduler = {
     setTimeout: (cb, ms) => this.setTimeout(cb, ms),
     clearTimeout: (h) => this.clearTimeout(h),
@@ -88,6 +93,14 @@ class Chihiros extends utils.Adapter {
     }
     await this.syncDeviceObjects(devices);
     await this.subscribeStatesAsync("devices.*");
+    for (const rt of this.runtime.values()) {
+      const id = rt.device.powerState;
+      if (id && (0, import_power.powerIndicator)(rt.device.type)) {
+        this.powerStates.set(id, rt);
+        await this.subscribeForeignStatesAsync(id);
+        await this.onPower(rt, await this.getForeignStateAsync(id));
+      }
+    }
     if (!host) {
       this.log.error("configuration: no ESPHome Bluetooth proxy is configured");
       return;
@@ -240,8 +253,19 @@ class Chihiros extends utils.Adapter {
         clockDue: d.type !== "light",
         clockSetAt: 0,
         clockReason: "",
-        values
+        values,
+        commandSeq: 0
       });
+      const indicator = (0, import_power.powerIndicator)(d.type);
+      if (indicator && d.powerState) {
+        await this.extendObject(`devices.${d.id}.${indicator.id}`, {
+          type: "state",
+          common: indicator.common,
+          native: {}
+        });
+      } else if (indicator && await this.getObjectAsync(`devices.${d.id}.${indicator.id}`)) {
+        await this.delObjectAsync(`devices.${d.id}.${indicator.id}`);
+      }
       this.log.debug(`device ${d.id}: ${d.type} ${d.mac}${d.seasonal ? " (seasonal)" : ""}`);
     }
     const existing = await this.getObjectViewAsync("system", "device", {
@@ -458,6 +482,11 @@ class Chihiros extends utils.Adapter {
    * @param state New state
    */
   onStateChange(id, state) {
+    const powerOf = this.powerStates.get(id);
+    if (powerOf) {
+      void this.onPower(powerOf, state);
+      return;
+    }
     if (!state || state.ack || this.stopping) {
       return;
     }
@@ -515,6 +544,7 @@ class Chihiros extends utils.Adapter {
     var _a, _b, _c;
     const d = rt.device;
     const base = `devices.${d.id}`;
+    const seq = ++rt.commandSeq;
     let plan;
     try {
       plan = this.buildPlan(rt, stateId, value);
@@ -541,6 +571,9 @@ class Chihiros extends utils.Adapter {
       if (confirm) {
         await this.setState(`${base}.commandResult`, "sent, waiting for the pump counter", true);
         void this.confirmDose(rt, confirm, before);
+      } else if (d.type === "fan" && d.powerState && typeof plan.states.level === "number") {
+        await this.setState(`${base}.commandResult`, "sent, checking the power", true);
+        void this.confirmFan(rt, plan.states.level, seq);
       } else {
         await this.setState(`${base}.commandResult`, acked ? import_commands.RESULT_UNCONFIRMED : import_commands.RESULT_UNACKED, true);
       }
@@ -591,13 +624,108 @@ class Chihiros extends utils.Adapter {
     this.log.warn(`${rt.device.name}: dose ${c.ml} ml ${msg}`);
   }
   /**
+   * Updates the on state of a device from its power state.
+   *
+   * @param rt Runtime data of the device
+   * @param state Power state
+   */
+  async onPower(rt, state) {
+    const indicator = (0, import_power.powerIndicator)(rt.device.type);
+    const on = indicator ? (0, import_power.isOn)(rt.device.type, state == null ? void 0 : state.val) : null;
+    if (!indicator || on === null || on === rt.powerOn || this.stopping) {
+      return;
+    }
+    rt.powerOn = on;
+    try {
+      await this.setState(`devices.${rt.device.id}.${indicator.id}`, on, true);
+    } catch (e) {
+      this.log.debug(`${rt.device.name}: power state not written: ${e.message}`);
+    }
+  }
+  /**
+   * Current power of a device, null when unknown or older than {@link POWER_MAX_AGE_MS}.
+   *
+   * @param rt Runtime data of the device
+   */
+  async currentPower(rt) {
+    if (!rt.device.powerState) {
+      return null;
+    }
+    const st = await this.getForeignStateAsync(rt.device.powerState);
+    if (!st || typeof st.val !== "number" || Date.now() - st.ts > import_power.POWER_MAX_AGE_MS) {
+      return null;
+    }
+    return st.val;
+  }
+  /**
+   * Fan: checks by the power whether a level command worked; if the fan does not start, kicks it
+   * (up, down, wanted level - like in the app) and checks again.
+   *
+   * @param rt Runtime data of the fan
+   * @param level Level that was sent
+   * @param seq Command number; stops when a newer command came
+   */
+  async confirmFan(rt, level, seq) {
+    const base = `devices.${rt.device.id}`;
+    const name = rt.device.name;
+    const stale = () => this.stopping || seq !== rt.commandSeq;
+    const result = async (text, level2 = "debug") => {
+      await this.setState(`${base}.commandResult`, text, true);
+      this.log[level2](`${name}: ${text}`);
+    };
+    const measure = async () => {
+      await new Promise((r) => this.scheduler.setTimeout(r, FAN_CHECK_DELAY_MS));
+      return stale() ? null : this.currentPower(rt);
+    };
+    try {
+      let w = await measure();
+      if (stale()) {
+        return;
+      }
+      if (w === null) {
+        await result("sent, not confirmed (no current power value)");
+        return;
+      }
+      if (level === 0) {
+        if (w <= import_power.POWER_OFF_W) {
+          await result(`confirmed: off (${w} W)`);
+        } else {
+          await result(`not confirmed: still ${w} W after "off" - please check the fan`, "warn");
+        }
+        return;
+      }
+      if ((0, import_power.isOn)("fan", w)) {
+        await result(`confirmed: running (${w} W)`);
+        return;
+      }
+      const kick = [...import_power.FAN_KICK_LEVELS, level];
+      await result(`not running after level ${level} (${w} W) - kicking ${kick.join(" -> ")}`, "info");
+      const frames = kick.map((l) => (0, import_commands.fanCommand)("level", l).frames[0]);
+      await this.withGatt(() => this.sendCommand(rt, frames, FAN_KICK_GAP_MS));
+      w = await measure();
+      if (stale()) {
+        return;
+      }
+      if (w !== null && (0, import_power.isOn)("fan", w)) {
+        await result(`confirmed after kick: running (${w} W)`, "info");
+      } else {
+        await result(`not running after kick (${w != null ? w : "?"} W) - please check the fan`, "warn");
+      }
+    } catch (e) {
+      if (!stale()) {
+        await result(`error while checking: ${e.message}`, "warn");
+      }
+    }
+  }
+  /**
    * One command session: login, clock (like the app), command frames, disconnect.
    *
    * @param rt Runtime data of the device
    * @param frames Command frames
+   * @param gapMs Pause between the frames
    * @returns false when the device did not acknowledge a command frame
    */
-  async sendCommand(rt, frames) {
+  async sendCommand(rt, frames, gapMs = 400) {
     var _a;
     const conn = (_a = this.proxy) == null ? void 0 : _a.connection;
     if (!conn || this.stopping) {
@@ -612,8 +740,8 @@ class Chihiros extends utils.Adapter {
         addressType: rt.addressType,
         frames: [this.encode(import_protocol.QUERY.status), this.encode((0, import_commands.clockFrame)(now)), ...frames.map((f) => this.encode(f))],
         isDone: (a) => a.some((x) => x.type === import_protocol.MSG.info),
-        timeoutMs: SESSION_TIMEOUT_MS,
-        gapMs: 400,
+        timeoutMs: SESSION_TIMEOUT_MS + frames.length * gapMs,
+        gapMs,
         attempts: 2,
         // login and clock must be acknowledged, the command frames themselves not always
         tolerateFrom: 2,

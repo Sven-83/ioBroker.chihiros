@@ -12,6 +12,8 @@
     "clock_sync_help": "Imposta l'orologio di un dispositivo se differisce di 2 minuti o più (es. dopo un'interruzione di corrente). I comandi impostano sempre l'orologio, come l'app.",
     "Devices": "Dispositivi",
     "devices_hint": "Inserire solo i propri dispositivi (MAC dalla scansione). Un dispositivo collegato all'app o all'hub WiFi non trasmette e risulta non raggiungibile. I dispositivi stagionali non generano avvisi.",
+    "Power state (optional)": "Stato potenza (facoltativo)",
+    "power_hint": "Stato potenza (facoltativo, ventola e controller CO2): stato con la potenza in W, es. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Viene solo letto, la presa non viene mai commutata. Ventola: mostra «in funzione» e verifica ogni comando di livello (se non parte, viene spinta: livello 11, 4, poi il livello voluto). CO2: mostra «valvola aperta».",
     "Name": "Nome",
     "Type": "Tipo",
     "MAC address": "Indirizzo MAC",

@@ -29,6 +29,7 @@ Status: early version. Reading all devices; controlling the light, manual doses 
 - **Controls** the light: red, green, blue, white (0-255) and on/off. Commands wait for a running read and are sent in their own short connection (login, clock, command). The light does not report these values back: the states show what this adapter set last (`commandResult` says "sent, not confirmed"). Changes made in the app are not seen.
 - **Manual dose** of the dosing pump: write ml (0.1-5 per command, safety limit) to `pumpN.doseNow`. About 15 s plus 6 s per ml later the adapter reads the total counter: `commandResult` says "confirmed: pump N total a -> b ml" or "not confirmed".
 - **Fan level** 0-20 (0 = off) in `level`. The fan does not report its level: the state shows what this adapter set last. The temperature control of the app is not supported yet.
+- **Power measurement** (optional, fan and CO2 controller): with a power state per device (e.g. a Shelly plug, only read, never switched) the adapter shows `running` (fan, from 0.5 W) or `valveOpen` (CO2, from 1 W). After every fan level command it checks the power 10 s later; if the fan did not start, it kicks it like in the app (level 11, 4, then the wanted level) and checks again. `commandResult` says "confirmed: running", "confirmed after kick" or "not running after kick" (warning).
 - **Sets the device clocks** (can be switched off): the light when its clock differs by 2 minutes or more, the other devices after the adapter start, when they are heard again (e.g. after a power cut) and once a day. Every command also sets the clock, like the app.
 
 ### Requirements
@@ -46,7 +47,7 @@ Status: early version. Reading all devices; controlling the light, manual doses 
 | Missing after (minutes) | A device counts as not reachable after this silence (default 5). |
 | Set device clocks | Set the clocks automatically (see above), default on. |
 | Read interval (minutes) | All reachable devices are read every this many minutes (default 5). While the app is open, a device cannot be read. |
-| Devices | Name, type (light, dosing pump, CO2 controller, Doctor, fan), MAC address and "seasonal" per device. |
+| Devices | Name, type (light, dosing pump, CO2 controller, Doctor, fan), MAC address, "seasonal" and an optional power state (W) per device. |
 
 Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY…` (e.g. `DYDOSE…`, `DYNFAN…`).
 
@@ -71,6 +72,7 @@ Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY�
 | `devices.<light>.on` | Light: **writable**; false = all channels 0, true = all channels to the values above |
 | `devices.<pump>.pumpN.doseNow` | Dosing pump: **writable**, dose this many ml now (0.1-5) |
 | `devices.<fan>.level` | Fan: **writable**, level 0-20 (0 = off), last value set by this adapter |
+| `devices.<fan>.running` / `devices.<co2>.valveOpen` | From the configured power state (only with a power state) |
 | `devices.<name>.lastCommand` / `.commandResult` | Last command and its result (`sent, not confirmed` or `error: ...`) |
 | `devices.<doctor>.waterTemp` | Doctor: water temperature in °C |
 | `devices.<fan>.waterTemp` / `.roomTemp` / `.humidity` | Fan: water and room temperature in °C, humidity in % |
@@ -102,6 +104,8 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 - (Sven-83) control the light (red, green, blue, white, on/off) through a command queue; set the device clocks
 - (Sven-83) manual dose of the dosing pump (max. 5 ml), confirmed by the total counter
 - (Sven-83) fan level 0-20
+- (Sven-83) a missing write acknowledgement of a command is reported as "not confirmed" instead of an error
+- (Sven-83) optional power state per device: fan running / CO2 valve open; fan commands checked by the power, kick when the fan does not start
 
 ### 0.0.1 (2026-11-17)
 

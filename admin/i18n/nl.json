@@ -12,6 +12,8 @@
     "clock_sync_help": "Stelt de klok van een apparaat in bij 2 minuten of meer afwijking (bijv. na stroomuitval). Opdrachten stellen de klok altijd mee in, net als de app.",
     "Devices": "Apparaten",
     "devices_hint": "Alleen eigen apparaten invoeren (MAC uit de scan). Een apparaat dat met de app of WiFi-hub verbonden is, zendt niets en geldt als onbereikbaar. Seizoensapparaten geven geen waarschuwing.",
+    "Power state (optional)": "Vermogen-datapunt (optioneel)",
+    "power_hint": "Vermogen-datapunt (optioneel, ventilator en CO2-regelaar): datapunt met het vermogen in W, bijv. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Wordt alleen gelezen, de stekker wordt nooit geschakeld. Ventilator: toont „draait” en controleert elke standopdracht (start hij niet, dan volgt een duwtje: stand 11, 4, dan de gewenste stand). CO2: toont „klep open”.",
     "Name": "Naam",
     "Type": "Type",
     "MAC address": "MAC-adres",

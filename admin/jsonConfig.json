@@ -90,14 +90,24 @@
             "lg": 12,
             "xl": 12
         },
+        "powerHint": {
+            "type": "staticText",
+            "text": "power_hint",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 12,
+            "lg": 12,
+            "xl": 12
+        },
         "devices": {
             "type": "table",
             "newLine": true,
             "xs": 12,
             "sm": 12,
             "md": 12,
-            "lg": 10,
-            "xl": 8,
+            "lg": 12,
+            "xl": 12,
             "uniqueColumns": [
                 "mac"
             ],
@@ -106,7 +116,7 @@
                     "type": "text",
                     "attr": "name",
                     "title": "Name",
-                    "width": "30%",
+                    "width": "20%",
                     "filter": false,
                     "sort": false,
                     "default": ""
@@ -115,7 +125,7 @@
                     "type": "select",
                     "attr": "type",
                     "title": "Type",
-                    "width": "20%",
+                    "width": "15%",
                     "filter": false,
                     "sort": false,
                     "default": "light",
@@ -146,7 +156,7 @@
                     "type": "text",
                     "attr": "mac",
                     "title": "MAC address",
-                    "width": "30%",
+                    "width": "20%",
                     "filter": false,
                     "sort": false,
                     "default": "",
@@ -158,10 +168,19 @@
                     "type": "checkbox",
                     "attr": "seasonal",
                     "title": "Seasonal",
-                    "width": "20%",
+                    "width": "10%",
                     "filter": false,
                     "sort": false,
                     "default": false
+                },
+                {
+                    "type": "text",
+                    "attr": "powerState",
+                    "title": "Power state (optional)",
+                    "width": "35%",
+                    "filter": false,
+                    "sort": false,
+                    "default": ""
                 }
             ]
         }

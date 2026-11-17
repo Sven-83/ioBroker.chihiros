@@ -12,6 +12,8 @@
     "clock_sync_help": "设备时钟偏差 2 分钟或以上时自动校准（例如断电后）。命令总会同时校准时钟，与 App 相同。",
     "Devices": "设备",
     "devices_hint": "只填写自己的设备（扫描得到的 MAC）。已连接 App 或 WiFi Hub 的设备不会广播，会被视为不可达。季节性设备不会触发警告。",
+    "Power state (optional)": "功率状态（可选）",
+    "power_hint": "功率状态（可选，风扇和 CO2 控制器）：以 W 表示功率的状态，例如 shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power。只读取，从不切换插座。风扇：显示“运行中”并检查每个档位命令（若未启动则先切到 11 档、4 档，再到目标档位）。CO2：显示“阀门打开”。",
     "Name": "名称",
     "Type": "类型",
     "MAC address": "MAC 地址",

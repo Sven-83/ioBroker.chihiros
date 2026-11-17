@@ -12,6 +12,8 @@
     "clock_sync_help": "Stellt die Uhr eines Geräts, wenn sie 2 Minuten oder mehr abweicht (z. B. nach Stromausfall). Befehle stellen die Uhr immer mit, wie die App.",
     "Devices": "Geräte",
     "devices_hint": "Nur die eigenen Geräte eintragen (MAC aus dem Scan). Ein Gerät, das mit App oder WiFi-Hub verbunden ist, sendet nichts und gilt als nicht erreichbar. Saisonale Geräte (z. B. Lüfter im Sommer) lösen keine Warnung aus.",
+    "Power state (optional)": "Leistungs-Datenpunkt (optional)",
+    "power_hint": "Leistungs-Datenpunkt (optional, Lüfter und CO2-Steuerung): Datenpunkt mit der Leistung in W, z. B. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Er wird nur gelesen, die Steckdose wird nie geschaltet. Lüfter: zeigt „läuft“ und prüft jeden Stufenbefehl (läuft er nicht an, wird er angestoßen: Stufe 11, 4, dann die gewünschte Stufe). CO2: zeigt „Ventil offen“.",
     "Name": "Name",
     "Type": "Typ",
     "MAC address": "MAC-Adresse",

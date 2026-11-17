@@ -12,6 +12,8 @@
     "clock_sync_help": "Acerta o relógio de um dispositivo quando difere 2 minutos ou mais (p. ex. após falha de energia). Os comandos acertam sempre o relógio, como a app.",
     "Devices": "Dispositivos",
     "devices_hint": "Introduza apenas os seus dispositivos (MAC do scan). Um dispositivo ligado à app ou ao hub WiFi não emite nada e é considerado inacessível. Dispositivos sazonais não geram aviso.",
+    "Power state (optional)": "Estado de potência (opcional)",
+    "power_hint": "Estado de potência (opcional, ventilador e controlador de CO2): estado com a potência em W, p. ex. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Só é lido, a tomada nunca é comutada. Ventilador: mostra «a funcionar» e verifica cada comando de nível (se não arrancar, recebe um impulso: 11, 4 e depois o nível pretendido). CO2: mostra «válvula aberta».",
     "Name": "Nome",
     "Type": "Tipo",
     "MAC address": "Endereço MAC",

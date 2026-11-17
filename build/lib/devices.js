@@ -29,6 +29,7 @@ __export(devices_exports, {
   toObjectId: () => toObjectId
 });
 module.exports = __toCommonJS(devices_exports);
+var import_power = require("./power");
 const DEVICE_TYPES = ["light", "doser", "co2", "doctor", "fan"];
 function normalizeMac(input) {
   if (typeof input !== "string") {
@@ -82,7 +83,17 @@ function parseDevices(raw) {
     }
     macs.add(mac);
     ids.add(id);
-    devices.push({ id, name, type, mac, macNum: macToNumber(mac), seasonal: r.seasonal === true });
+    const device = { id, name, type, mac, macNum: macToNumber(mac), seasonal: r.seasonal === true };
+    const rawPower = typeof r.powerState === "string" ? r.powerState.trim() : "";
+    if (rawPower) {
+      const power = (0, import_power.parsePowerState)(rawPower);
+      if (power) {
+        device.powerState = power;
+      } else {
+        errors.push(`${line}: invalid power state ID "${rawPower}" - ignored`);
+      }
+    }
+    devices.push(device);
   });
   return { devices, errors };
 }
