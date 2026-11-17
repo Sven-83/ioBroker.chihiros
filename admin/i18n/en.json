@@ -8,6 +8,8 @@
     "seen_minutes_help": "How long a device may be silent before it counts as not reachable.",
     "Read interval (minutes)": "Read interval (minutes)",
     "poll_minutes_help": "All devices are read one after the other in short Bluetooth connections. While the app is open, a device cannot be read.",
+    "Set device clocks": "Set device clocks",
+    "clock_sync_help": "Sets the clock of a device when it differs by 2 minutes or more (e.g. after a power cut). Commands always set the clock, like the app.",
     "Devices": "Devices",
     "devices_hint": "Enter your own devices only (MAC from the scan). A device connected to the app or the WiFi hub sends nothing and counts as not reachable. Seasonal devices (e.g. a fan used in summer) do not raise a warning.",
     "Name": "Name",

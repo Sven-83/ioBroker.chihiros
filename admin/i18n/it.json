@@ -8,6 +8,8 @@
     "seen_minutes_help": "Per quanto un dispositivo può tacere prima di essere considerato non raggiungibile.",
     "Read interval (minutes)": "Intervallo di lettura (minuti)",
     "poll_minutes_help": "Tutti i dispositivi vengono letti uno dopo l'altro con brevi connessioni Bluetooth. Con l'app aperta un dispositivo non può essere letto.",
+    "Set device clocks": "Impostare l’orologio dei dispositivi",
+    "clock_sync_help": "Imposta l'orologio di un dispositivo se differisce di 2 minuti o più (es. dopo un'interruzione di corrente). I comandi impostano sempre l'orologio, come l'app.",
     "Devices": "Dispositivi",
     "devices_hint": "Inserire solo i propri dispositivi (MAC dalla scansione). Un dispositivo collegato all'app o all'hub WiFi non trasmette e risulta non raggiungibile. I dispositivi stagionali non generano avvisi.",
     "Name": "Nome",

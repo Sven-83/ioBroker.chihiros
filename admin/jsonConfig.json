@@ -58,6 +58,17 @@
             "lg": 2,
             "xl": 2
         },
+        "clockSync": {
+            "type": "checkbox",
+            "label": "Set device clocks",
+            "help": "clock_sync_help",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 6,
+            "xl": 6
+        },
         "devicesHeader": {
             "type": "header",
             "text": "Devices",

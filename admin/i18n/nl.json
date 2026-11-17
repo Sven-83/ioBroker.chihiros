@@ -8,6 +8,8 @@
     "seen_minutes_help": "Zo lang mag een apparaat stil zijn voordat het als onbereikbaar geldt.",
     "Read interval (minutes)": "Leesinterval (minuten)",
     "poll_minutes_help": "Alle apparaten worden na elkaar via korte Bluetooth-verbindingen gelezen. Zolang de app open is, kan een apparaat niet worden gelezen.",
+    "Set device clocks": "Klok van apparaten instellen",
+    "clock_sync_help": "Stelt de klok van een apparaat in bij 2 minuten of meer afwijking (bijv. na stroomuitval). Opdrachten stellen de klok altijd mee in, net als de app.",
     "Devices": "Apparaten",
     "devices_hint": "Alleen eigen apparaten invoeren (MAC uit de scan). Een apparaat dat met de app of WiFi-hub verbonden is, zendt niets en geldt als onbereikbaar. Seizoensapparaten geven geen waarschuwing.",
     "Name": "Naam",

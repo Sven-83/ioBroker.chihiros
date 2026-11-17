@@ -1,15 +1,26 @@
 /*
  * ioBroker.chihiros - Chihiros aquarium devices over Bluetooth through an ESPHome Bluetooth proxy.
  * Phase 1: proxy connection and presence of the configured devices.
- * Phase 2: reads the values of all devices one after the other in short GATT sessions (read only).
+ * Phase 2: reads the values of all devices one after the other in short GATT sessions.
+ * Phase 3: commands (allowlist per device type) through a queue shared with the read rounds; sets device clocks.
  */
 import * as utils from '@iobroker/adapter-core';
 import { Connection } from '@2colors/esphome-native-api';
 import { type Device, decideReachable, parseDevices, presenceLogLevel } from './lib/devices';
 import { type GattApi, runSession, SessionError } from './lib/gatt';
-import { MessageIds } from './lib/protocol';
+import {
+    COMMON_COMMAND_STATES,
+    clockFrame,
+    CommandError,
+    type CommandPlan,
+    lightCommand,
+    type RawFrame,
+    RESULT_UNCONFIRMED,
+    writeStates,
+} from './lib/commands';
+import { encodeFrame, MessageIds, MSG, QUERY } from './lib/protocol';
 import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient, type Scheduler } from './lib/proxy';
-import { interpret, readPlan } from './lib/reader';
+import { clockDeviation, interpret, readPlan } from './lib/reader';
 import { COMMON_READ_STATES, readChannels, readStates, resultToStates } from './lib/states';
 
 const EVALUATE_MS = 15_000;
@@ -19,6 +30,10 @@ const RSSI_WRITE_MS = 60_000;
 const FIRST_READ_DELAY_MS = 20_000;
 /** Maximum duration of one GATT session after connecting */
 const SESSION_TIMEOUT_MS = 12_000;
+/** Clock deviation (minutes) from which the light clock is set */
+const CLOCK_MAX_DEVIATION_MIN = 2;
+/** Devices without a readable clock get the clock at least this often */
+const CLOCK_REFRESH_MS = 24 * 3600_000;
 
 const TYPE_NAMES: Record<Device['type'], string> = {
     light: 'Light',
@@ -38,6 +53,12 @@ interface DeviceRuntime {
     addressType: number;
     /** Failed reads in a row */
     readFailures: number;
+    /** Set the clock in the next session */
+    clockDue: boolean;
+    /** When the clock was set last */
+    clockSetAt: number;
+    /** Last set values of the writable states */
+    values: Record<string, ioBroker.StateValue>;
 }
 
 class Chihiros extends utils.Adapter {
@@ -52,6 +73,9 @@ class Chihiros extends utils.Adapter {
     private polling = false;
     private stopping = false;
     private readonly ids = new MessageIds();
+    private clockSync = true;
+    /** Serialises all GATT sessions (the proxy and the devices handle one connection at a time) */
+    private gattChain: Promise<void> = Promise.resolve();
     private readonly scheduler: Scheduler = {
         setTimeout: (cb, ms) => this.setTimeout(cb, ms),
         clearTimeout: h => this.clearTimeout(h as ioBroker.Timeout),
@@ -61,6 +85,7 @@ class Chihiros extends utils.Adapter {
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'chihiros' });
         this.on('ready', this.onReady.bind(this));
+        this.on('stateChange', this.onStateChange.bind(this));
         this.on('unload', this.onUnload.bind(this));
     }
 
@@ -73,12 +98,14 @@ class Chihiros extends utils.Adapter {
         this.seenMs = (Number.isFinite(minutes) && minutes >= 1 && minutes <= 60 ? minutes : 5) * 60_000;
         const poll = Number(this.config.pollMinutes);
         this.pollMs = (Number.isFinite(poll) && poll >= 1 && poll <= 60 ? poll : 5) * 60_000;
+        this.clockSync = this.config.clockSync !== false;
 
         const { devices, errors } = parseDevices(this.config.devices);
         for (const e of errors) {
             this.log.error(`configuration: ${e}`);
         }
         await this.syncDeviceObjects(devices);
+        await this.subscribeStatesAsync('devices.*');
 
         if (!host) {
             this.log.error('configuration: no ESPHome Bluetooth proxy is configured');
@@ -211,6 +238,15 @@ class Chihiros extends utils.Adapter {
             for (const st of [...COMMON_READ_STATES, ...readStates(d.type)]) {
                 await this.extendObject(`devices.${d.id}.${st.id}`, { type: 'state', common: st.common, native: {} });
             }
+            const writable = writeStates(d.type);
+            const values: Record<string, ioBroker.StateValue> = {};
+            for (const st of writable.length > 0 ? [...COMMON_COMMAND_STATES, ...writable] : []) {
+                await this.extendObject(`devices.${d.id}.${st.id}`, { type: 'state', common: st.common, native: {} });
+            }
+            for (const st of writable) {
+                const cur = await this.getStateAsync(`devices.${d.id}.${st.id}`);
+                values[st.id] = cur?.val ?? st.common.def ?? null;
+            }
             const lastSeen = await this.getStateAsync(`devices.${d.id}.lastSeen`);
             this.runtime.set(d.macNum, {
                 device: d,
@@ -219,6 +255,10 @@ class Chihiros extends utils.Adapter {
                 bleName: '',
                 addressType: 0,
                 readFailures: 0,
+                // the light reports its clock (checked by deviation), the others get it after the start
+                clockDue: d.type !== 'light',
+                clockSetAt: 0,
+                values,
             });
             this.log.debug(`device ${d.id}: ${d.type} ${d.mac}${d.seasonal ? ' (seasonal)' : ''}`);
         }
@@ -263,6 +303,10 @@ class Chihiros extends utils.Adapter {
                 if (reachable !== undefined && reachable !== rt.reachable) {
                     const first = rt.reachable === undefined;
                     rt.reachable = reachable;
+                    if (reachable && !first && d.type !== 'light') {
+                        // back after a power cut or after the app: the clock may be wrong
+                        rt.clockDue = true;
+                    }
                     await this.setState(`devices.${d.id}.reachable`, reachable, true);
                     if (!first || !reachable) {
                         const msg = reachable
@@ -312,7 +356,7 @@ class Chihiros extends utils.Adapter {
                 if (rt.reachable !== true) {
                     continue;
                 }
-                await this.readDevice(rt);
+                await this.withGatt(() => this.readDevice(rt));
             }
         } catch (e) {
             this.log.warn(`read round failed: ${(e as Error).message}`);
@@ -336,6 +380,14 @@ class Chihiros extends utils.Adapter {
             return;
         }
         const plan = readPlan(d.type, this.ids);
+        if (d.type !== 'light' && Date.now() - rt.clockSetAt > CLOCK_REFRESH_MS) {
+            rt.clockDue = true;
+        }
+        const setClock = this.clockSync && rt.clockDue;
+        if (setClock) {
+            // after the status query, like the app
+            plan.frames.splice(1, 0, this.encode(clockFrame(new Date())));
+        }
         try {
             const answers = await runSession(
                 conn as unknown as GattApi,
@@ -354,7 +406,19 @@ class Chihiros extends utils.Adapter {
                 return;
             }
             const now = new Date();
-            const values = resultToStates(interpret(d.type, answers), now);
+            if (setClock) {
+                this.clockWasSet(rt, now);
+            }
+            const result = interpret(d.type, answers);
+            if (result.light && Math.abs(clockDeviation(result.light.clockMinute, now)) >= CLOCK_MAX_DEVIATION_MIN) {
+                rt.clockDue = true;
+                this.log.info(
+                    `${d.name}: device clock deviates by ${clockDeviation(result.light.clockMinute, now)} min${
+                        this.clockSync ? ' - setting it in the next round' : ''
+                    }`,
+                );
+            }
+            const values = resultToStates(result, now);
             for (const [id, val] of Object.entries(values)) {
                 await this.setState(`devices.${d.id}.${id}`, val, true);
             }
@@ -377,6 +441,165 @@ class Chihiros extends utils.Adapter {
             const level = rt.readFailures === 1 || rt.readFailures % 12 === 0 ? 'warn' : 'debug';
             this.log[level](`${d.name} (${d.mac}): read failed (${rt.readFailures}x): ${msg}`);
         }
+    }
+
+    /**
+     * Runs GATT work after all work queued before (one session at a time).
+     *
+     * @param fn Work
+     */
+    private withGatt<T>(fn: () => Promise<T>): Promise<T> {
+        const run = this.gattChain.then(fn, fn);
+        this.gattChain = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
+    /**
+     * Encodes a raw frame with the next message ID.
+     *
+     * @param f Raw frame
+     */
+    private encode(f: RawFrame | readonly [number, number, readonly number[]]): Uint8Array {
+        return encodeFrame(f[0], f[1], f[2], this.ids.next());
+    }
+
+    /**
+     * Notes a set clock.
+     *
+     * @param rt Runtime data of the device
+     * @param now Time that was set
+     */
+    private clockWasSet(rt: DeviceRuntime, now: Date): void {
+        const firstTime = rt.clockSetAt === 0;
+        rt.clockDue = false;
+        rt.clockSetAt = now.getTime();
+        this.log[firstTime ? 'debug' : 'info'](`${rt.device.name}: clock set to ${now.toLocaleTimeString()}`);
+    }
+
+    /**
+     * Handles writes to the command states (ack=false).
+     *
+     * @param id Full state ID
+     * @param state New state
+     */
+    private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
+        if (!state || state.ack || this.stopping) {
+            return;
+        }
+        const prefix = `${this.namespace}.devices.`;
+        if (!id.startsWith(prefix)) {
+            return;
+        }
+        const [devId, ...rest] = id.slice(prefix.length).split('.');
+        const stateId = rest.join('.');
+        const rt = [...this.runtime.values()].find(r => r.device.id === devId);
+        if (!rt || !writeStates(rt.device.type).some(s => s.id === stateId)) {
+            return;
+        }
+        void this.runCommand(rt, stateId, state.val);
+    }
+
+    /**
+     * Builds the command plan of a write.
+     *
+     * @param rt Runtime data of the device
+     * @param stateId Relative state ID
+     * @param value Written value
+     */
+    private buildPlan(rt: DeviceRuntime, stateId: string, value: ioBroker.StateValue): CommandPlan {
+        switch (rt.device.type) {
+            case 'light': {
+                const num = (k: string): number => {
+                    const v = rt.values[k];
+                    return typeof v === 'number' ? v : 0;
+                };
+                const cur = {
+                    red: num('red'),
+                    green: num('green'),
+                    blue: num('blue'),
+                    white: num('white'),
+                    on: rt.values.on === true,
+                };
+                return lightCommand(stateId, value, cur);
+            }
+            default:
+                throw new CommandError(`${stateId} is not writable`);
+        }
+    }
+
+    /**
+     * Validates and sends one command, then confirms the states with ack (or restores them on failure).
+     *
+     * @param rt Runtime data of the device
+     * @param stateId Relative state ID
+     * @param value Written value
+     */
+    private async runCommand(rt: DeviceRuntime, stateId: string, value: ioBroker.StateValue): Promise<void> {
+        const d = rt.device;
+        const base = `devices.${d.id}`;
+        let plan: CommandPlan | undefined;
+        try {
+            plan = this.buildPlan(rt, stateId, value);
+            await this.setState(`${base}.lastCommand`, plan.label, true);
+            if (!this.proxy?.connection) {
+                throw new CommandError('proxy not connected');
+            }
+            if (rt.reachable !== true) {
+                throw new CommandError('device not reachable (no power, or held by the app/hub?)');
+            }
+            const frames = plan.frames;
+            await this.withGatt(() => this.sendCommand(rt, frames));
+            for (const [k, v] of Object.entries(plan.states)) {
+                rt.values[k] = v;
+                await this.setState(`${base}.${k}`, v, true);
+            }
+            await this.setState(`${base}.commandResult`, RESULT_UNCONFIRMED, true);
+            this.log.info(`${d.name}: ${plan.label} sent`);
+        } catch (e) {
+            if (this.stopping) {
+                return;
+            }
+            const busy = e instanceof SessionError && e.busy;
+            const msg = `${(e as Error).message}${busy ? ' - held by the app/hub?' : ''}`;
+            if (!plan) {
+                await this.setState(`${base}.lastCommand`, `${stateId} ${JSON.stringify(value)}`, true);
+            }
+            await this.setState(`${base}.commandResult`, `error: ${msg}`, true);
+            // the device keeps its old value: show it again
+            await this.setState(`${base}.${stateId}`, rt.values[stateId] ?? null, true);
+            this.log.warn(`${d.name}: ${plan?.label ?? stateId} failed: ${msg}`);
+        }
+    }
+
+    /**
+     * One command session: login, clock (like the app), command frames, disconnect.
+     *
+     * @param rt Runtime data of the device
+     * @param frames Command frames
+     */
+    private async sendCommand(rt: DeviceRuntime, frames: RawFrame[]): Promise<void> {
+        const conn = this.proxy?.connection;
+        if (!conn || this.stopping) {
+            throw new CommandError('proxy not connected');
+        }
+        const now = new Date();
+        await runSession(
+            conn as unknown as GattApi,
+            {
+                address: rt.device.macNum,
+                addressType: rt.addressType,
+                frames: [this.encode(QUERY.status), this.encode(clockFrame(now)), ...frames.map(f => this.encode(f))],
+                isDone: a => a.some(x => x.type === MSG.info),
+                timeoutMs: SESSION_TIMEOUT_MS,
+                gapMs: 400,
+                attempts: 2,
+            },
+            this.scheduler,
+        );
+        this.clockWasSet(rt, now);
     }
 
     private onUnload(callback: () => void): void {

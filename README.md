@@ -12,7 +12,7 @@ Connects Chihiros aquarium devices (WRGB II light, dosing pump, CO2 controller, 
 
 German description: [docs/de/README.md](docs/de/README.md)
 
-Status: early version, **read only**. Controlling the devices follows in the next versions.
+Status: early version. Reading all devices; controlling the light. More commands follow in the next versions.
 
 ### What it does (so far)
 
@@ -20,12 +20,14 @@ Status: early version, **read only**. Controlling the devices follows in the nex
 - Shows per configured device whether it is heard (`reachable`), when (`lastSeen`), signal strength (`rssi`) and its Bluetooth name
 - Warns in the log when a device is missing; **seasonal** devices (e.g. a fan only used in summer) are reported without a warning
 - Re-subscribes when the proxy stops forwarding advertisements (another API client on the same proxy takes them over since ESPHome 2026.7)
-- **Reads** all reachable devices one after the other in short Bluetooth connections (default every 5 minutes, about 1–2 s per device). Only query commands are sent; the clock of a device is not set and nothing is changed.
+- **Reads** all reachable devices one after the other in short Bluetooth connections (default every 5 minutes, about 1–2 s per device). Reading sends query commands only (plus the clock when needed, see below).
   - Dosing pump: dosed ml per pump in total and today
   - Light: device clock, schedule (on times as in the app, sunrise/sunset duration, points) and the red level the schedule gives now. The light does not report its green, blue and white values; the app keeps them itself.
   - Doctor: water temperature
   - Fan: water and room temperature, humidity
   - CO2 controller: reachable only (it reports no valve state)
+- **Controls** the light: red, green, blue, white (0-255) and on/off. Commands wait for a running read and are sent in their own short connection (login, clock, command). The light does not report these values back: the states show what this adapter set last (`commandResult` says "sent, not confirmed"). Changes made in the app are not seen.
+- **Sets the device clocks** (can be switched off): the light when its clock differs by 2 minutes or more, the other devices after the adapter start, when they are heard again (e.g. after a power cut) and once a day. Every command also sets the clock, like the app.
 
 ### Requirements
 
@@ -40,6 +42,7 @@ Status: early version, **read only**. Controlling the devices follows in the nex
 | Proxy host or IP | The ESPHome proxy near the aquarium. |
 | API encryption key | `api: encryption: key` of the proxy (base64). Stored encrypted. |
 | Missing after (minutes) | A device counts as not reachable after this silence (default 5). |
+| Set device clocks | Set the clocks automatically (see above), default on. |
 | Read interval (minutes) | All reachable devices are read every this many minutes (default 5). While the app is open, a device cannot be read. |
 | Devices | Name, type (light, dosing pump, CO2 controller, Doctor, fan), MAC address and "seasonal" per device. |
 
@@ -62,6 +65,9 @@ Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY�
 | `devices.<light>.schedule` | Light: on times including sunrise and sunset, e.g. `11:00-12:00, 14:00-20:00` |
 | `devices.<light>.sunrise` / `.sunset` | Light: sunrise / sunset duration in minutes (first window) |
 | `devices.<light>.schedulePoints` / `.scheduledLevel` | Light: schedule points (JSON) and the red level by schedule now (green, blue, white are not reported) |
+| `devices.<light>.red` / `.green` / `.blue` / `.white` | Light: channel values 0-255, **writable** (last value set by this adapter) |
+| `devices.<light>.on` | Light: **writable**; false = all channels 0, true = all channels to the values above |
+| `devices.<name>.lastCommand` / `.commandResult` | Last command and its result (`sent, not confirmed` or `error: ...`) |
 | `devices.<doctor>.waterTemp` | Doctor: water temperature in °C |
 | `devices.<fan>.waterTemp` / `.roomTemp` / `.humidity` | Fan: water and room temperature in °C, humidity in % |
 
@@ -89,6 +95,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 - (Sven-83) no "not heard" warnings while the proxy is down or right after (re)connecting
 - (Sven-83) read values of dosing pump, light, Doctor and fan in short GATT sessions (read only)
 - (Sven-83) light: on times including sunrise/sunset as in the app, new states `sunrise`/`sunset`; `scheduledLevel` is the red channel only
+- (Sven-83) control the light (red, green, blue, white, on/off) through a command queue; set the device clocks
 
 ### 0.0.1 (2026-11-17)
 

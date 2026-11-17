@@ -3,7 +3,7 @@
 Bindet Chihiros-Aquariengeräte (Licht WRGB II, Dosierpumpe, CO2-Steuerung, Doctor, Lüfter) per **Bluetooth** an ioBroker an –
 ohne Chihiros-Cloud und ohne WiFi-Hub. Der Adapter erreicht die Geräte über einen **ESPHome-Bluetooth-Proxy** in der Nähe des Aquariums.
 
-Stand: frühe Version, **nur lesen**. Geräte steuern folgt in den nächsten Versionen.
+Stand: frühe Version. Alle Geräte lesen, Licht steuern. Weitere Befehle folgen in den nächsten Versionen.
 
 ## Funktionen (bisher)
 
@@ -11,12 +11,14 @@ Stand: frühe Version, **nur lesen**. Geräte steuern folgt in den nächsten Ver
 - Je Gerät: wird es gehört (`reachable`), wann zuletzt (`lastSeen`), Signalstärke (`rssi`), Bluetooth-Name
 - Warnung im Log, wenn ein Gerät fehlt; **saisonale** Geräte (z. B. Lüfter nur im Sommer) ohne Warnung
 - Neu abonnieren, wenn der Proxy keine Meldungen mehr weiterreicht (seit ESPHome 2026.7 übernimmt ein zweiter API-Client sie)
-- **Werte lesen**: alle erreichbaren Geräte nacheinander in kurzen Bluetooth-Verbindungen (Standard alle 5 Minuten, je Gerät 1–2 s). Es werden nur Abfragen gesendet, keine Uhrzeit gestellt, nichts verändert.
+- **Werte lesen**: alle erreichbaren Geräte nacheinander in kurzen Bluetooth-Verbindungen (Standard alle 5 Minuten, je Gerät 1–2 s). Beim Lesen werden nur Abfragen gesendet (und bei Bedarf die Uhr gestellt, siehe unten).
   - Dosierpumpe: dosierte ml je Pumpe gesamt und heute
   - Licht: Uhr des Geräts, Zeitplan (An-Zeiten wie in der App, Dauer Sonnenaufgang/-untergang, Punkte), Rot laut Zeitplan jetzt. Grün, Blau und Weiß meldet das Licht nicht zurück; die App führt diese Werte selbst.
   - Doctor: Wassertemperatur
   - Lüfter: Wasser- und Raumtemperatur, Luftfeuchte
   - CO2-Steuerung: nur erreichbar (sie meldet keinen Ventilzustand)
+- **Licht steuern**: Rot, Grün, Blau, Weiß (0–255) und an/aus (`red`, `green`, `blue`, `white`, `on`). Befehle warten auf eine laufende Abfrage und laufen in einer eigenen kurzen Verbindung (Anmelden, Uhr, Befehl). Das Licht meldet die Werte nicht zurück: Die Datenpunkte zeigen, was der Adapter zuletzt gesetzt hat (`commandResult`: „sent, not confirmed“). Änderungen in der App sieht der Adapter nicht.
+- **Uhr der Geräte stellen** (abschaltbar): beim Licht ab 2 Minuten Abweichung, bei den anderen Geräten nach dem Adapterstart, wenn sie wieder gehört werden (z. B. nach Stromausfall) und einmal am Tag. Jeder Befehl stellt die Uhr mit, wie die App.
 
 ## Voraussetzungen
 
@@ -32,6 +34,7 @@ Stand: frühe Version, **nur lesen**. Geräte steuern folgt in den nächsten Ver
 | API-Verschlüsselungsschlüssel | `api: encryption: key` des Proxys (Base64), wird verschlüsselt gespeichert |
 | Fehlt nach (Minuten) | So lange darf ein Gerät schweigen (Standard 5) |
 | Abfrage-Intervall (Minuten) | So oft werden alle erreichbaren Geräte gelesen (Standard 5); bei offener App kann ein Gerät nicht gelesen werden |
+| Uhr der Geräte stellen | Uhren automatisch stellen (siehe oben), Standard an |
 | Geräte | Name, Typ, MAC-Adresse und „saisonal“ je Gerät |
 
 ## Sicherheit

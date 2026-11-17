@@ -8,6 +8,8 @@
     "seen_minutes_help": "So lange darf ein Gerät schweigen, bevor es als nicht erreichbar gilt.",
     "Read interval (minutes)": "Abfrage-Intervall (Minuten)",
     "poll_minutes_help": "Alle Geräte werden nacheinander in kurzen Bluetooth-Verbindungen gelesen. Solange die App offen ist, kann ein Gerät nicht gelesen werden.",
+    "Set device clocks": "Uhr der Geräte stellen",
+    "clock_sync_help": "Stellt die Uhr eines Geräts, wenn sie 2 Minuten oder mehr abweicht (z. B. nach Stromausfall). Befehle stellen die Uhr immer mit, wie die App.",
     "Devices": "Geräte",
     "devices_hint": "Nur die eigenen Geräte eintragen (MAC aus dem Scan). Ein Gerät, das mit App oder WiFi-Hub verbunden ist, sendet nichts und gilt als nicht erreichbar. Saisonale Geräte (z. B. Lüfter im Sommer) lösen keine Warnung aus.",
     "Name": "Name",

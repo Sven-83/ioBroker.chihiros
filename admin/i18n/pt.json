@@ -8,6 +8,8 @@
     "seen_minutes_help": "Tempo que um dispositivo pode ficar em silêncio antes de ser considerado inacessível.",
     "Read interval (minutes)": "Intervalo de leitura (minutos)",
     "poll_minutes_help": "Todos os dispositivos são lidos um após o outro em ligações Bluetooth curtas. Com a app aberta, um dispositivo não pode ser lido.",
+    "Set device clocks": "Acertar relógios dos dispositivos",
+    "clock_sync_help": "Acerta o relógio de um dispositivo quando difere 2 minutos ou mais (p. ex. após falha de energia). Os comandos acertam sempre o relógio, como a app.",
     "Devices": "Dispositivos",
     "devices_hint": "Introduza apenas os seus dispositivos (MAC do scan). Um dispositivo ligado à app ou ao hub WiFi não emite nada e é considerado inacessível. Dispositivos sazonais não geram aviso.",
     "Name": "Nome",

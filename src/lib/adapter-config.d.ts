@@ -22,6 +22,8 @@ declare global {
             seenMinutes: number;
             /** Read all devices every this many minutes */
             pollMinutes: number;
+            /** Set the device clocks automatically */
+            clockSync: boolean;
         }
     }
 }

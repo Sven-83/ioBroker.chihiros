@@ -8,6 +8,8 @@
     "seen_minutes_help": "Durée de silence tolérée avant qu'un appareil soit considéré comme injoignable.",
     "Read interval (minutes)": "Intervalle de lecture (minutes)",
     "poll_minutes_help": "Tous les appareils sont lus l'un après l'autre par de courtes connexions Bluetooth. Tant que l'app est ouverte, un appareil ne peut pas être lu.",
+    "Set device clocks": "Régler l’horloge des appareils",
+    "clock_sync_help": "Règle l'horloge d'un appareil dès 2 minutes d'écart (p. ex. après une coupure de courant). Les commandes règlent toujours l'horloge, comme l'app.",
     "Devices": "Appareils",
     "devices_hint": "Saisissez uniquement vos appareils (MAC issue du scan). Un appareil connecté à l'app ou au hub WiFi n'émet rien et est considéré comme injoignable. Les appareils saisonniers ne déclenchent pas d'avertissement.",
     "Name": "Nom",
