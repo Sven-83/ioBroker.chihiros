@@ -14,6 +14,7 @@ import {
     CommandError,
     type CommandPlan,
     doserCommand,
+    fanCommand,
     lightCommand,
     type RawFrame,
     RESULT_UNCONFIRMED,
@@ -543,6 +544,8 @@ class Chihiros extends utils.Adapter {
             }
             case 'doser':
                 return doserCommand(stateId, value);
+            case 'fan':
+                return fanCommand(stateId, value);
             default:
                 throw new CommandError(`${stateId} is not writable`);
         }

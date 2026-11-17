@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { clockFrame, clockParams, CommandError, doserCommand, lightCommand, writeStates } from './commands';
+import { clockFrame, clockParams, CommandError, doserCommand, fanCommand, lightCommand, writeStates } from './commands';
 
 const CUR = { red: 133, green: 84, blue: 129, white: 65, on: true };
 
@@ -14,7 +14,8 @@ describe('commands', () => {
             'pump4.doseNow',
         ]);
         expect(writeStates('doser')[0].common.max).to.equal(5);
-        expect(writeStates('fan')).to.deep.equal([]);
+        expect(writeStates('fan').map(s => s.id)).to.deep.equal(['level']);
+        expect(writeStates('co2')).to.deep.equal([]);
     });
 
     it('builds the clock frame like the app', () => {
@@ -101,5 +102,27 @@ describe('commands', () => {
         }
         expect(() => doserCommand('pump5.doseNow', 1)).to.throw(/not writable/);
         expect(() => doserCommand('pump1.total', 1)).to.throw(/not writable/);
+    });
+
+    it('builds the fan level like the write test', () => {
+        // write test 17.11.2026: 5a/07 [ff 05] = level 5
+        expect(fanCommand('level', 5)).to.deep.equal({
+            label: 'level 5',
+            frames: [[0x5a, 0x07, [0xff, 5]]],
+            states: { level: 5 },
+        });
+        expect(fanCommand('level', '0')).to.deep.equal({
+            label: 'off',
+            frames: [[0x5a, 0x07, [0xff, 0]]],
+            states: { level: 0 },
+        });
+        expect(fanCommand('level', 20).frames).to.deep.equal([[0x5a, 0x07, [0xff, 20]]]);
+    });
+
+    it('rejects invalid fan levels', () => {
+        for (const v of [-1, 21, 2.5, 'x', null, true]) {
+            expect(() => fanCommand('level', v)).to.throw(CommandError);
+        }
+        expect(() => fanCommand('speed', 1)).to.throw(/not writable/);
     });
 });

@@ -22,6 +22,7 @@ __export(commands_exports, {
   CommandError: () => CommandError,
   LIGHT_CHANNELS: () => LIGHT_CHANNELS,
   MAX_DOSE_ML: () => MAX_DOSE_ML,
+  MAX_FAN_LEVEL: () => MAX_FAN_LEVEL,
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
   MODE_DOSE: () => MODE_DOSE,
@@ -29,6 +30,7 @@ __export(commands_exports, {
   clockFrame: () => clockFrame,
   clockParams: () => clockParams,
   doserCommand: () => doserCommand,
+  fanCommand: () => fanCommand,
   lightCommand: () => lightCommand,
   writeStates: () => writeStates
 });
@@ -39,6 +41,7 @@ const MODE_CLOCK = 9;
 const MODE_CHANNEL = 7;
 const MODE_DOSE = 27;
 const MAX_DOSE_ML = 5;
+const MAX_FAN_LEVEL = 20;
 const LIGHT_CHANNELS = ["red", "green", "blue", "white"];
 const RESULT_UNCONFIRMED = "sent, not confirmed (the device does not report this value)";
 class CommandError extends Error {
@@ -111,6 +114,23 @@ function writeStates(type) {
           def: 0
         }
       }));
+    case "fan":
+      return [
+        {
+          id: "level",
+          common: {
+            name: `Level (0 = off, 1-${MAX_FAN_LEVEL}; set by this adapter, not reported by the fan)`,
+            type: "number",
+            role: "level",
+            min: 0,
+            max: MAX_FAN_LEVEL,
+            step: 1,
+            read: true,
+            write: true,
+            def: 0
+          }
+        }
+      ];
     default:
       return [];
   }
@@ -177,12 +197,27 @@ function doserCommand(id, value) {
     confirm: { pump, ml }
   };
 }
+function fanCommand(id, value) {
+  if (id !== "level") {
+    throw new CommandError(`${id} is not writable`);
+  }
+  const v = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > MAX_FAN_LEVEL) {
+    throw new CommandError(`invalid level ${JSON.stringify(value)} (0-${MAX_FAN_LEVEL})`);
+  }
+  return {
+    label: v === 0 ? "off" : `level ${v}`,
+    frames: [[import_protocol.CMD_5A, MODE_CHANNEL, [255, v]]],
+    states: { level: v }
+  };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   COMMON_COMMAND_STATES,
   CommandError,
   LIGHT_CHANNELS,
   MAX_DOSE_ML,
+  MAX_FAN_LEVEL,
   MODE_CHANNEL,
   MODE_CLOCK,
   MODE_DOSE,
@@ -190,6 +225,7 @@ function doserCommand(id, value) {
   clockFrame,
   clockParams,
   doserCommand,
+  fanCommand,
   lightCommand,
   writeStates
 });

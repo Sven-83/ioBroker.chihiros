@@ -17,6 +17,9 @@ export const MODE_DOSE = 0x1b;
 /** Largest manual dose per command in ml (safety limit, Sven 17.11.2026) */
 export const MAX_DOSE_ML = 5;
 
+/** Highest fan level in the app (Sven 17.11.2026) */
+export const MAX_FAN_LEVEL = 20;
+
 /** Light channels in device order (0=red, 1=green, 2=blue, 3=white; confirmed by write test) */
 export const LIGHT_CHANNELS = ['red', 'green', 'blue', 'white'] as const;
 /** Name of a light channel */
@@ -119,6 +122,23 @@ export function writeStates(type: DeviceType): StateDef[] {
                     def: 0,
                 },
             }));
+        case 'fan':
+            return [
+                {
+                    id: 'level',
+                    common: {
+                        name: `Level (0 = off, 1-${MAX_FAN_LEVEL}; set by this adapter, not reported by the fan)`,
+                        type: 'number',
+                        role: 'level',
+                        min: 0,
+                        max: MAX_FAN_LEVEL,
+                        step: 1,
+                        read: true,
+                        write: true,
+                        def: 0,
+                    },
+                },
+            ];
         default:
             return [];
     }
@@ -221,5 +241,26 @@ export function doserCommand(id: string, value: ioBroker.StateValue): CommandPla
         frames: [[CMD_A5, MODE_DOSE, [pump - 1, 0, 0, 0, tenths]]],
         states: { [id]: ml },
         confirm: { pump, ml },
+    };
+}
+
+/**
+ * Builds the frame for a fan level: 5a/07 [ff level] (write test 17.11.2026: [ff 05] = level 5, [ff 00] = off).
+ *
+ * @param id Relative state ID (level)
+ * @param value Written level
+ */
+export function fanCommand(id: string, value: ioBroker.StateValue): CommandPlan {
+    if (id !== 'level') {
+        throw new CommandError(`${id} is not writable`);
+    }
+    const v = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > MAX_FAN_LEVEL) {
+        throw new CommandError(`invalid level ${JSON.stringify(value)} (0-${MAX_FAN_LEVEL})`);
+    }
+    return {
+        label: v === 0 ? 'off' : `level ${v}`,
+        frames: [[CMD_5A, MODE_CHANNEL, [0xff, v]]],
+        states: { level: v },
     };
 }

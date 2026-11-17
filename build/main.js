@@ -498,6 +498,8 @@ class Chihiros extends utils.Adapter {
       }
       case "doser":
         return (0, import_commands.doserCommand)(stateId, value);
+      case "fan":
+        return (0, import_commands.fanCommand)(stateId, value);
       default:
         throw new import_commands.CommandError(`${stateId} is not writable`);
     }
