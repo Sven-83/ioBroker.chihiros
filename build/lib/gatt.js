@@ -69,7 +69,7 @@ function findUart(services) {
   return null;
 }
 async function runSession(api, opt, scheduler) {
-  var _a;
+  var _a, _b;
   const sleep = (ms) => new Promise((r) => scheduler.setTimeout(r, ms));
   const withTimeout = (p, ms, what) => new Promise((resolve, reject) => {
     const t = scheduler.setTimeout(() => reject(new SessionError(`${what} timed out`, false)), ms);
@@ -143,12 +143,19 @@ async function runSession(api, opt, scheduler) {
       );
     }
     const deadline = scheduler.now() + opt.timeoutMs;
-    for (const f of opt.frames) {
-      await withTimeout(
-        api.writeBluetoothGATTCharacteristicService(opt.address, uart.write, f, true),
-        5e3,
-        "write"
-      );
+    for (let i = 0; i < opt.frames.length; i++) {
+      try {
+        await withTimeout(
+          api.writeBluetoothGATTCharacteristicService(opt.address, uart.write, opt.frames[i], true),
+          6e3,
+          "write"
+        );
+      } catch (e) {
+        if (opt.tolerateFrom === void 0 || i < opt.tolerateFrom) {
+          throw e;
+        }
+        (_b = opt.onUnacked) == null ? void 0 : _b.call(opt, i);
+      }
       await sleep(opt.gapMs);
     }
     while (!opt.isDone(answers) && scheduler.now() < deadline) {

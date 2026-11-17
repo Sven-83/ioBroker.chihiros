@@ -17,6 +17,7 @@ import {
     fanCommand,
     lightCommand,
     type RawFrame,
+    RESULT_UNACKED,
     RESULT_UNCONFIRMED,
     writeStates,
 } from './lib/commands';
@@ -578,17 +579,17 @@ class Chihiros extends utils.Adapter {
                 before = typeof st?.val === 'number' ? st.val : undefined;
             }
             const frames = plan.frames;
-            await this.withGatt(() => this.sendCommand(rt, frames));
+            const acked = await this.withGatt(() => this.sendCommand(rt, frames));
             for (const [k, v] of Object.entries(plan.states)) {
                 rt.values[k] = v;
                 await this.setState(`${base}.${k}`, v, true);
             }
-            this.log.info(`${d.name}: ${plan.label} sent`);
+            this.log.info(`${d.name}: ${plan.label} sent${acked ? '' : ' (no write acknowledgement)'}`);
             if (confirm) {
                 await this.setState(`${base}.commandResult`, 'sent, waiting for the pump counter', true);
                 void this.confirmDose(rt, confirm, before);
             } else {
-                await this.setState(`${base}.commandResult`, RESULT_UNCONFIRMED, true);
+                await this.setState(`${base}.commandResult`, acked ? RESULT_UNCONFIRMED : RESULT_UNACKED, true);
             }
         } catch (e) {
             if (this.stopping) {
@@ -648,13 +649,15 @@ class Chihiros extends utils.Adapter {
      *
      * @param rt Runtime data of the device
      * @param frames Command frames
+     * @returns false when the device did not acknowledge a command frame
      */
-    private async sendCommand(rt: DeviceRuntime, frames: RawFrame[]): Promise<void> {
+    private async sendCommand(rt: DeviceRuntime, frames: RawFrame[]): Promise<boolean> {
         const conn = this.proxy?.connection;
         if (!conn || this.stopping) {
             throw new CommandError('proxy not connected');
         }
         const now = new Date();
+        let acked = true;
         await runSession(
             conn as unknown as GattApi,
             {
@@ -665,10 +668,14 @@ class Chihiros extends utils.Adapter {
                 timeoutMs: SESSION_TIMEOUT_MS,
                 gapMs: 400,
                 attempts: 2,
+                // login and clock must be acknowledged, the command frames themselves not always
+                tolerateFrom: 2,
+                onUnacked: () => (acked = false),
             },
             this.scheduler,
         );
         this.clockWasSet(rt, now);
+        return acked;
     }
 
     private onUnload(callback: () => void): void {

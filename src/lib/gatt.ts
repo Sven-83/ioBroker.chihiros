@@ -134,6 +134,13 @@ export interface SessionOptions {
     gapMs: number;
     /** Connection attempts */
     attempts: number;
+    /**
+     * Index of the first frame whose missing write acknowledgement is tolerated (command frames: e.g. the fan
+     * starting from standstill runs the command but does not acknowledge the write). Default: none.
+     */
+    tolerateFrom?: number;
+    /** Called for each tolerated frame without write acknowledgement */
+    onUnacked?: (index: number) => void;
 }
 
 /**
@@ -222,12 +229,19 @@ export async function runSession(api: GattApi, opt: SessionOptions, scheduler: S
             );
         }
         const deadline = scheduler.now() + opt.timeoutMs;
-        for (const f of opt.frames) {
-            await withTimeout(
-                api.writeBluetoothGATTCharacteristicService(opt.address, uart.write, f, true),
-                5_000,
-                'write',
-            );
+        for (let i = 0; i < opt.frames.length; i++) {
+            try {
+                await withTimeout(
+                    api.writeBluetoothGATTCharacteristicService(opt.address, uart.write, opt.frames[i], true),
+                    6_000,
+                    'write',
+                );
+            } catch (e) {
+                if (opt.tolerateFrom === undefined || i < opt.tolerateFrom) {
+                    throw e;
+                }
+                opt.onUnacked?.(i);
+            }
             await sleep(opt.gapMs);
         }
         while (!opt.isDone(answers) && scheduler.now() < deadline) {

@@ -26,6 +26,7 @@ __export(commands_exports, {
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
   MODE_DOSE: () => MODE_DOSE,
+  RESULT_UNACKED: () => RESULT_UNACKED,
   RESULT_UNCONFIRMED: () => RESULT_UNCONFIRMED,
   clockFrame: () => clockFrame,
   clockParams: () => clockParams,
@@ -44,6 +45,7 @@ const MAX_DOSE_ML = 5;
 const MAX_FAN_LEVEL = 20;
 const LIGHT_CHANNELS = ["red", "green", "blue", "white"];
 const RESULT_UNCONFIRMED = "sent, not confirmed (the device does not report this value)";
+const RESULT_UNACKED = "sent, but the device did not acknowledge it - not confirmed";
 class CommandError extends Error {
 }
 const COMMON_COMMAND_STATES = [
@@ -221,6 +223,7 @@ function fanCommand(id, value) {
   MODE_CHANNEL,
   MODE_CLOCK,
   MODE_DOSE,
+  RESULT_UNACKED,
   RESULT_UNCONFIRMED,
   clockFrame,
   clockParams,

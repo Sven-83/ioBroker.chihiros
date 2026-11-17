@@ -532,17 +532,17 @@ class Chihiros extends utils.Adapter {
         before = typeof (st == null ? void 0 : st.val) === "number" ? st.val : void 0;
       }
       const frames = plan.frames;
-      await this.withGatt(() => this.sendCommand(rt, frames));
+      const acked = await this.withGatt(() => this.sendCommand(rt, frames));
       for (const [k, v] of Object.entries(plan.states)) {
         rt.values[k] = v;
         await this.setState(`${base}.${k}`, v, true);
       }
-      this.log.info(`${d.name}: ${plan.label} sent`);
+      this.log.info(`${d.name}: ${plan.label} sent${acked ? "" : " (no write acknowledgement)"}`);
       if (confirm) {
         await this.setState(`${base}.commandResult`, "sent, waiting for the pump counter", true);
         void this.confirmDose(rt, confirm, before);
       } else {
-        await this.setState(`${base}.commandResult`, import_commands.RESULT_UNCONFIRMED, true);
+        await this.setState(`${base}.commandResult`, acked ? import_commands.RESULT_UNCONFIRMED : import_commands.RESULT_UNACKED, true);
       }
     } catch (e) {
       if (this.stopping) {
@@ -595,6 +595,7 @@ class Chihiros extends utils.Adapter {
    *
    * @param rt Runtime data of the device
    * @param frames Command frames
+   * @returns false when the device did not acknowledge a command frame
    */
   async sendCommand(rt, frames) {
     var _a;
@@ -603,6 +604,7 @@ class Chihiros extends utils.Adapter {
       throw new import_commands.CommandError("proxy not connected");
     }
     const now = /* @__PURE__ */ new Date();
+    let acked = true;
     await (0, import_gatt.runSession)(
       conn,
       {
@@ -612,11 +614,15 @@ class Chihiros extends utils.Adapter {
         isDone: (a) => a.some((x) => x.type === import_protocol.MSG.info),
         timeoutMs: SESSION_TIMEOUT_MS,
         gapMs: 400,
-        attempts: 2
+        attempts: 2,
+        // login and clock must be acknowledged, the command frames themselves not always
+        tolerateFrom: 2,
+        onUnacked: () => acked = false
       },
       this.scheduler
     );
     this.clockWasSet(rt, now);
+    return acked;
   }
   onUnload(callback) {
     var _a;

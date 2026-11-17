@@ -27,6 +27,8 @@ export type LightChannel = (typeof LIGHT_CHANNELS)[number];
 
 /** Result text: the device accepted the frames but does not report the new value */
 export const RESULT_UNCONFIRMED = 'sent, not confirmed (the device does not report this value)';
+/** Result text: the device did not even acknowledge the write (seen with the fan starting from standstill) */
+export const RESULT_UNACKED = 'sent, but the device did not acknowledge it - not confirmed';
 
 /** A frame before encoding: [cmd, mode, params] */
 export type RawFrame = [number, number, number[]];

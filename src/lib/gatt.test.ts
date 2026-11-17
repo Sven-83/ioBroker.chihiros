@@ -24,6 +24,8 @@ class FakeGatt extends EventEmitter implements GattApi {
     public disconnects = 0;
     /** Answers sent as notification after each write */
     public reply: (frame: number[]) => number[][] = () => [];
+    /** Writes (by index) that are never acknowledged */
+    public noAck = new Set<number>();
 
     public connectBluetoothDeviceService(): Promise<{ connected: boolean; error?: number }> {
         return Promise.resolve(this.connectResults.shift() ?? { connected: false, error: 133 });
@@ -44,6 +46,9 @@ class FakeGatt extends EventEmitter implements GattApi {
     public writeBluetoothGATTCharacteristicService(_a: number, _h: number, value: Uint8Array): Promise<unknown> {
         const f = Array.from(value);
         this.writes.push(f);
+        if (this.noAck.has(this.writes.length - 1)) {
+            return Promise.reject(new Error('sendMessage timeout waiting for BluetoothGATTWriteResponse'));
+        }
         for (const r of this.reply(f)) {
             setImmediate(() =>
                 this.emit('message.BluetoothGATTNotifyDataResponse', {
@@ -145,5 +150,32 @@ describe('gatt', () => {
         }, 20);
         const answers = await p;
         expect(answers).to.have.length(1);
+    });
+
+    it('tolerates a missing write acknowledgement of command frames only', async () => {
+        const cmd = Uint8Array.from([0x5a, 0x01, 0x07, 0x00, 0x02, 0x07, 0xff, 0x05, 0xf8]);
+        const api = new FakeGatt();
+        api.reply = f => (f[5] === 0x04 ? [INFO] : []);
+        api.noAck.add(1);
+        const unacked: number[] = [];
+        await runSession(
+            api,
+            { ...opts, frames: [...opts.frames, cmd], tolerateFrom: 1, onUnacked: i => unacked.push(i) },
+            scheduler,
+        );
+        expect(unacked).to.deep.equal([1]);
+        expect(api.disconnects).to.equal(1);
+
+        // a missing acknowledgement of the login/clock part is still an error
+        const api2 = new FakeGatt();
+        api2.reply = () => [INFO];
+        api2.noAck.add(0);
+        try {
+            await runSession(api2, { ...opts, frames: [...opts.frames, cmd], tolerateFrom: 1 }, scheduler);
+            expect.fail('no error');
+        } catch (e) {
+            expect((e as Error).message).to.match(/timeout/);
+        }
+        expect(api2.disconnects).to.equal(1);
     });
 });
