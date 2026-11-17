@@ -13,7 +13,7 @@
     "Devices": "Dispositivi",
     "devices_hint": "Inserire solo i propri dispositivi (MAC dalla scansione). Un dispositivo collegato all'app o all'hub WiFi non trasmette e risulta non raggiungibile. I dispositivi stagionali non generano avvisi.",
     "Power state (optional)": "Stato potenza (facoltativo)",
-    "power_hint": "Stato potenza (facoltativo, ventola e controller CO2): stato con la potenza in W, es. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Viene solo letto, la presa non viene mai commutata. Ventola: mostra «in funzione» e verifica ogni comando di livello (se non parte, viene spinta: livello 11, 4, poi il livello voluto). CO2: mostra «valvola aperta».",
+    "power_hint": "Stato potenza (facoltativo, ventola e controller CO2): stato con la potenza in W, es. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Viene solo letto, la presa non viene mai commutata. Ventola: mostra «in funzione» e verifica ogni comando di livello (se non parte, viene spinta: livello 20, 11, 4, 20, 11, poi il livello voluto). CO2: mostra «valvola aperta».",
     "Name": "Nome",
     "Type": "Tipo",
     "MAC address": "Indirizzo MAC",

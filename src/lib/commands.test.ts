@@ -106,17 +106,21 @@ describe('commands', () => {
 
     it('builds the fan level like the write test', () => {
         // write test 17.11.2026: 5a/07 [ff 05] = level 5
+        const queries = [
+            [0xa5, 0x04, [0x06]],
+            [0xa5, 0x04, [0x08]],
+        ];
         expect(fanCommand('level', 5)).to.deep.equal({
             label: 'level 5',
-            frames: [[0x5a, 0x07, [0xff, 5]]],
+            frames: [...queries, [0x5a, 0x07, [0xff, 5]]],
             states: { level: 5 },
         });
         expect(fanCommand('level', '0')).to.deep.equal({
             label: 'off',
-            frames: [[0x5a, 0x07, [0xff, 0]]],
+            frames: [...queries, [0x5a, 0x07, [0xff, 0]]],
             states: { level: 0 },
         });
-        expect(fanCommand('level', 20).frames).to.deep.equal([[0x5a, 0x07, [0xff, 20]]]);
+        expect(fanCommand('level', 20).frames[2]).to.deep.equal([0x5a, 0x07, [0xff, 20]]);
     });
 
     it('rejects invalid fan levels', () => {

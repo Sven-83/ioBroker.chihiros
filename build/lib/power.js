@@ -28,7 +28,7 @@ __export(power_exports, {
 module.exports = __toCommonJS(power_exports);
 const POWER_ON_W = { fan: 0.5, co2: 1 };
 const POWER_OFF_W = 0.2;
-const FAN_KICK_LEVELS = [11, 4];
+const FAN_KICK_LEVELS = [20, 11, 4, 20, 11];
 function powerIndicator(type) {
   switch (type) {
     case "fan":

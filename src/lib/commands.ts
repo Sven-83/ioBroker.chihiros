@@ -9,6 +9,8 @@ import { PUMPS, type StateDef } from './states';
 
 /** Mode byte: set the clock, params [year-2000, month, weekday 1=Mon..7=Sun, hour, minute, second] */
 export const MODE_CLOCK = 0x09;
+/** Mode byte: query, e.g. a5/04 [06] and [08] the app sends to the fan before a level */
+export const MODE_QUERY = 0x04;
 /** Mode byte: set one channel of the light, params [channel, value 0-255] */
 export const MODE_CHANNEL = 0x07;
 
@@ -262,7 +264,12 @@ export function fanCommand(id: string, value: ioBroker.StateValue): CommandPlan 
     }
     return {
         label: v === 0 ? 'off' : `level ${v}`,
-        frames: [[CMD_5A, MODE_CHANNEL, [0xff, v]]],
+        // like the app: the two queries (settings, temperature history) before the level
+        frames: [
+            [CMD_A5, MODE_QUERY, [0x06]],
+            [CMD_A5, MODE_QUERY, [0x08]],
+            [CMD_5A, MODE_CHANNEL, [0xff, v]],
+        ],
         states: { level: v },
     };
 }

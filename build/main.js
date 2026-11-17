@@ -41,7 +41,7 @@ const DOSE_CONFIRM_DELAY_MS = 15e3;
 const DOSE_MS_PER_ML = 6e3;
 const DOSE_CONFIRM_RETRY_MS = 3e4;
 const FAN_CHECK_DELAY_MS = 1e4;
-const FAN_KICK_GAP_MS = 1500;
+const FAN_KICK_STEP_MS = 4e3;
 const TYPE_NAMES = {
   light: "Light",
   doser: "Dosing pump",
@@ -699,19 +699,32 @@ class Chihiros extends utils.Adapter {
         await result(`confirmed: running (${w} W)`);
         return;
       }
-      const kick = [...import_power.FAN_KICK_LEVELS, level];
-      await result(`not running after level ${level} (${w} W) - kicking ${kick.join(" -> ")}`, "info");
-      const frames = kick.map((l) => (0, import_commands.fanCommand)("level", l).frames[0]);
-      await this.withGatt(() => this.sendCommand(rt, frames, FAN_KICK_GAP_MS));
-      w = await measure();
-      if (stale()) {
-        return;
+      await result(`not running after level ${level} (${w} W) - kicking ${import_power.FAN_KICK_LEVELS.join(" / ")}`, "info");
+      const send = (l) => this.withGatt(() => this.sendCommand(rt, (0, import_commands.fanCommand)("level", l).frames));
+      const pause = () => new Promise((r) => this.scheduler.setTimeout(r, FAN_KICK_STEP_MS));
+      for (const [i, kickLevel] of import_power.FAN_KICK_LEVELS.entries()) {
+        await send(kickLevel);
+        await pause();
+        if (stale()) {
+          return;
+        }
+        w = await this.currentPower(rt);
+        if (w !== null && (0, import_power.isOn)("fan", w)) {
+          if (kickLevel !== level) {
+            await send(level);
+          }
+          await result(
+            `confirmed after kick (step ${i + 1}, level ${kickLevel}): running (${w} W), level ${level} set`,
+            "info"
+          );
+          return;
+        }
       }
-      if (w !== null && (0, import_power.isOn)("fan", w)) {
-        await result(`confirmed after kick: running (${w} W)`, "info");
-      } else {
-        await result(`not running after kick (${w != null ? w : "?"} W) - please check the fan`, "warn");
-      }
+      await send(level);
+      await result(
+        `not running after ${import_power.FAN_KICK_LEVELS.length} kick steps (${w != null ? w : "?"} W) - please check the fan`,
+        "warn"
+      );
     } catch (e) {
       if (!stale()) {
         await result(`error while checking: ${e.message}`, "warn");

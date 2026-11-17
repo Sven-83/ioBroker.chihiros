@@ -13,7 +13,7 @@
     "Devices": "Dispositivos",
     "devices_hint": "Introduzca solo sus dispositivos (MAC del escaneo). Un dispositivo conectado a la app o al hub WiFi no emite nada y se considera inaccesible. Los dispositivos estacionales no generan aviso.",
     "Power state (optional)": "Estado de potencia (opcional)",
-    "power_hint": "Estado de potencia (opcional, ventilador y controlador de CO2): estado con la potencia en W, p. ej. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Solo se lee, el enchufe nunca se conmuta. Ventilador: muestra «en marcha» y comprueba cada orden de nivel (si no arranca, recibe un impulso: nivel 11, 4 y luego el nivel deseado). CO2: muestra «válvula abierta».",
+    "power_hint": "Estado de potencia (opcional, ventilador y controlador de CO2): estado con la potencia en W, p. ej. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Solo se lee, el enchufe nunca se conmuta. Ventilador: muestra «en marcha» y comprueba cada orden de nivel (si no arranca, recibe un impulso: nivel 20, 11, 4, 20, 11 y luego el nivel deseado). CO2: muestra «válvula abierta».",
     "Name": "Nombre",
     "Type": "Tipo",
     "MAC address": "Dirección MAC",

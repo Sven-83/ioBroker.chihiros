@@ -13,7 +13,7 @@
     "Devices": "Appareils",
     "devices_hint": "Saisissez uniquement vos appareils (MAC issue du scan). Un appareil connecté à l'app ou au hub WiFi n'émet rien et est considéré comme injoignable. Les appareils saisonniers ne déclenchent pas d'avertissement.",
     "Power state (optional)": "État de puissance (facultatif)",
-    "power_hint": "État de puissance (facultatif, ventilateur et contrôleur CO2) : état avec la puissance en W, p. ex. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Il est seulement lu, la prise n'est jamais commutée. Ventilateur : indique « en marche » et vérifie chaque commande de niveau (s'il ne démarre pas, il est relancé : niveau 11, 4, puis le niveau voulu). CO2 : indique « vanne ouverte ».",
+    "power_hint": "État de puissance (facultatif, ventilateur et contrôleur CO2) : état avec la puissance en W, p. ex. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Il est seulement lu, la prise n'est jamais commutée. Ventilateur : indique « en marche » et vérifie chaque commande de niveau (s'il ne démarre pas, il est relancé : niveau 20, 11, 4, 20, 11, puis le niveau voulu). CO2 : indique « vanne ouverte ».",
     "Name": "Nom",
     "Type": "Type",
     "MAC address": "Adresse MAC",

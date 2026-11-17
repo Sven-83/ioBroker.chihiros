@@ -26,6 +26,7 @@ __export(commands_exports, {
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
   MODE_DOSE: () => MODE_DOSE,
+  MODE_QUERY: () => MODE_QUERY,
   RESULT_UNACKED: () => RESULT_UNACKED,
   RESULT_UNCONFIRMED: () => RESULT_UNCONFIRMED,
   clockFrame: () => clockFrame,
@@ -39,6 +40,7 @@ module.exports = __toCommonJS(commands_exports);
 var import_protocol = require("./protocol");
 var import_states = require("./states");
 const MODE_CLOCK = 9;
+const MODE_QUERY = 4;
 const MODE_CHANNEL = 7;
 const MODE_DOSE = 27;
 const MAX_DOSE_ML = 5;
@@ -209,7 +211,12 @@ function fanCommand(id, value) {
   }
   return {
     label: v === 0 ? "off" : `level ${v}`,
-    frames: [[import_protocol.CMD_5A, MODE_CHANNEL, [255, v]]],
+    // like the app: the two queries (settings, temperature history) before the level
+    frames: [
+      [import_protocol.CMD_A5, MODE_QUERY, [6]],
+      [import_protocol.CMD_A5, MODE_QUERY, [8]],
+      [import_protocol.CMD_5A, MODE_CHANNEL, [255, v]]
+    ],
     states: { level: v }
   };
 }
@@ -223,6 +230,7 @@ function fanCommand(id, value) {
   MODE_CHANNEL,
   MODE_CLOCK,
   MODE_DOSE,
+  MODE_QUERY,
   RESULT_UNACKED,
   RESULT_UNCONFIRMED,
   clockFrame,

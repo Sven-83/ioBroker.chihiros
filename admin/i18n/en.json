@@ -13,7 +13,7 @@
     "Devices": "Devices",
     "devices_hint": "Enter your own devices only (MAC from the scan). A device connected to the app or the WiFi hub sends nothing and counts as not reachable. Seasonal devices (e.g. a fan used in summer) do not raise a warning.",
     "Power state (optional)": "Power state (optional)",
-    "power_hint": "Power state (optional, fan and CO2 controller): state with the power in W, e.g. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. It is only read, the plug is never switched. Fan: shows \"running\" and checks every level command (if the fan does not start, it is kicked: level 11, 4, then the wanted level). CO2: shows \"valve open\".",
+    "power_hint": "Power state (optional, fan and CO2 controller): state with the power in W, e.g. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. It is only read, the plug is never switched. Fan: shows \"running\" and checks every level command (if the fan does not start, it is kicked: level 20, 11, 4, 20, 11, then the wanted level). CO2: shows \"valve open\".",
     "Name": "Name",
     "Type": "Type",
     "MAC address": "MAC address",

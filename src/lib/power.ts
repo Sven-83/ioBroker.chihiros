@@ -12,8 +12,12 @@ export const POWER_ON_W: Partial<Record<DeviceType, number>> = { fan: 0.5, co2: 
 /** Power up to which a device counts as off, in W */
 export const POWER_OFF_W = 0.2;
 
-/** Fan: levels sent to get a fan running that does not start (Sven 17.11.2026: up, down, then the wanted level) */
-export const FAN_KICK_LEVELS = [11, 4] as const;
+/**
+ * Fan: levels tried one after the other (each in its own connection, power checked in between) when the fan
+ * does not start. A fan standing still sometimes starts only after several level changes (17.11.2026: app
+ * 11, 4, 7, 11; adapter level 20 from standstill started at once).
+ */
+export const FAN_KICK_LEVELS = [20, 11, 4, 20, 11] as const;
 
 /**
  * State that shows the measured on state (only when a power state is configured).

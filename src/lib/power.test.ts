@@ -32,8 +32,8 @@ describe('power', () => {
         expect(powerIndicator('doser')).to.equal(null);
     });
 
-    it('kicks the fan up, then down', () => {
-        expect([...FAN_KICK_LEVELS]).to.deep.equal([11, 4]);
+    it('kicks the fan with several level changes, starting with the highest level', () => {
+        expect([...FAN_KICK_LEVELS]).to.deep.equal([20, 11, 4, 20, 11]);
     });
 
     it('accepts plain state IDs only', () => {

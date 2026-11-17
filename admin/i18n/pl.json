@@ -13,7 +13,7 @@
     "Devices": "Urządzenia",
     "devices_hint": "Wpisz tylko własne urządzenia (MAC ze skanu). Urządzenie połączone z aplikacją lub hubem WiFi nic nie nadaje i jest uznawane za niedostępne. Urządzenia sezonowe nie wywołują ostrzeżeń.",
     "Power state (optional)": "Stan mocy (opcjonalnie)",
-    "power_hint": "Stan mocy (opcjonalnie, wentylator i sterownik CO2): stan z mocą w W, np. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Jest tylko odczytywany, gniazdo nigdy nie jest przełączane. Wentylator: pokazuje „pracuje” i sprawdza każde polecenie biegu (jeśli nie ruszy, zostaje pobudzony: bieg 11, 4, potem żądany). CO2: pokazuje „zawór otwarty”.",
+    "power_hint": "Stan mocy (opcjonalnie, wentylator i sterownik CO2): stan z mocą w W, np. shelly.0.SHPLG-S#XXXXXX#1.Relay0.Power. Jest tylko odczytywany, gniazdo nigdy nie jest przełączane. Wentylator: pokazuje „pracuje” i sprawdza każde polecenie biegu (jeśli nie ruszy, zostaje pobudzony: bieg 20, 11, 4, 20, 11, potem żądany). CO2: pokazuje „zawór otwarty”.",
     "Name": "Nazwa",
     "Type": "Typ",
     "MAC address": "Adres MAC",
