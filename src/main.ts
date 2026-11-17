@@ -13,6 +13,7 @@ import {
     clockFrame,
     CommandError,
     type CommandPlan,
+    doserCommand,
     lightCommand,
     type RawFrame,
     RESULT_UNCONFIRMED,
@@ -34,6 +35,11 @@ const SESSION_TIMEOUT_MS = 12_000;
 const CLOCK_MAX_DEVIATION_MIN = 2;
 /** Devices without a readable clock get the clock at least this often */
 const CLOCK_REFRESH_MS = 24 * 3600_000;
+/** First counter check after a manual dose: base delay plus time per ml */
+const DOSE_CONFIRM_DELAY_MS = 15_000;
+const DOSE_MS_PER_ML = 6_000;
+/** Second counter check */
+const DOSE_CONFIRM_RETRY_MS = 30_000;
 
 const TYPE_NAMES: Record<Device['type'], string> = {
     light: 'Light',
@@ -57,6 +63,8 @@ interface DeviceRuntime {
     clockDue: boolean;
     /** When the clock was set last */
     clockSetAt: number;
+    /** Why the clock is due (logged as info); empty = routine (logged as debug) */
+    clockReason: string;
     /** Last set values of the writable states */
     values: Record<string, ioBroker.StateValue>;
 }
@@ -258,6 +266,7 @@ class Chihiros extends utils.Adapter {
                 // the light reports its clock (checked by deviation), the others get it after the start
                 clockDue: d.type !== 'light',
                 clockSetAt: 0,
+                clockReason: '',
                 values,
             });
             this.log.debug(`device ${d.id}: ${d.type} ${d.mac}${d.seasonal ? ' (seasonal)' : ''}`);
@@ -306,6 +315,7 @@ class Chihiros extends utils.Adapter {
                     if (reachable && !first && d.type !== 'light') {
                         // back after a power cut or after the app: the clock may be wrong
                         rt.clockDue = true;
+                        rt.clockReason = 'heard again';
                     }
                     await this.setState(`devices.${d.id}.reachable`, reachable, true);
                     if (!first || !reachable) {
@@ -373,11 +383,11 @@ class Chihiros extends utils.Adapter {
      *
      * @param rt Runtime data of the device
      */
-    private async readDevice(rt: DeviceRuntime): Promise<void> {
+    private async readDevice(rt: DeviceRuntime): Promise<Record<string, ioBroker.StateValue> | null> {
         const d = rt.device;
         const conn = this.proxy?.connection;
         if (!conn) {
-            return;
+            return null;
         }
         const plan = readPlan(d.type, this.ids);
         if (d.type !== 'light' && Date.now() - rt.clockSetAt > CLOCK_REFRESH_MS) {
@@ -403,7 +413,7 @@ class Chihiros extends utils.Adapter {
                 this.scheduler,
             );
             if (this.stopping) {
-                return;
+                return null;
             }
             const now = new Date();
             if (setClock) {
@@ -412,6 +422,7 @@ class Chihiros extends utils.Adapter {
             const result = interpret(d.type, answers);
             if (result.light && Math.abs(clockDeviation(result.light.clockMinute, now)) >= CLOCK_MAX_DEVIATION_MIN) {
                 rt.clockDue = true;
+                rt.clockReason = 'deviation';
                 this.log.info(
                     `${d.name}: device clock deviates by ${clockDeviation(result.light.clockMinute, now)} min${
                         this.clockSync ? ' - setting it in the next round' : ''
@@ -429,9 +440,10 @@ class Chihiros extends utils.Adapter {
             }
             rt.readFailures = 0;
             this.log.debug(`${d.name}: ${JSON.stringify(values)}`);
+            return values;
         } catch (e) {
             if (this.stopping) {
-                return;
+                return null;
             }
             rt.readFailures++;
             const busy = e instanceof SessionError && e.busy;
@@ -440,6 +452,7 @@ class Chihiros extends utils.Adapter {
             // warn once, then every 12th failure (about once an hour with the default interval)
             const level = rt.readFailures === 1 || rt.readFailures % 12 === 0 ? 'warn' : 'debug';
             this.log[level](`${d.name} (${d.mac}): read failed (${rt.readFailures}x): ${msg}`);
+            return null;
         }
     }
 
@@ -473,10 +486,13 @@ class Chihiros extends utils.Adapter {
      * @param now Time that was set
      */
     private clockWasSet(rt: DeviceRuntime, now: Date): void {
-        const firstTime = rt.clockSetAt === 0;
+        const reason = rt.clockReason;
         rt.clockDue = false;
+        rt.clockReason = '';
         rt.clockSetAt = now.getTime();
-        this.log[firstTime ? 'debug' : 'info'](`${rt.device.name}: clock set to ${now.toLocaleTimeString()}`);
+        this.log[reason ? 'info' : 'debug'](
+            `${rt.device.name}: clock set to ${now.toLocaleTimeString()}${reason ? ` (${reason})` : ''}`,
+        );
     }
 
     /**
@@ -525,6 +541,8 @@ class Chihiros extends utils.Adapter {
                 };
                 return lightCommand(stateId, value, cur);
             }
+            case 'doser':
+                return doserCommand(stateId, value);
             default:
                 throw new CommandError(`${stateId} is not writable`);
         }
@@ -550,14 +568,25 @@ class Chihiros extends utils.Adapter {
             if (rt.reachable !== true) {
                 throw new CommandError('device not reachable (no power, or held by the app/hub?)');
             }
+            const confirm = plan.confirm;
+            let before: number | undefined;
+            if (confirm) {
+                const st = await this.getStateAsync(`${base}.pump${confirm.pump}.total`);
+                before = typeof st?.val === 'number' ? st.val : undefined;
+            }
             const frames = plan.frames;
             await this.withGatt(() => this.sendCommand(rt, frames));
             for (const [k, v] of Object.entries(plan.states)) {
                 rt.values[k] = v;
                 await this.setState(`${base}.${k}`, v, true);
             }
-            await this.setState(`${base}.commandResult`, RESULT_UNCONFIRMED, true);
             this.log.info(`${d.name}: ${plan.label} sent`);
+            if (confirm) {
+                await this.setState(`${base}.commandResult`, 'sent, waiting for the pump counter', true);
+                void this.confirmDose(rt, confirm, before);
+            } else {
+                await this.setState(`${base}.commandResult`, RESULT_UNCONFIRMED, true);
+            }
         } catch (e) {
             if (this.stopping) {
                 return;
@@ -572,6 +601,43 @@ class Chihiros extends utils.Adapter {
             await this.setState(`${base}.${stateId}`, rt.values[stateId] ?? null, true);
             this.log.warn(`${d.name}: ${plan?.label ?? stateId} failed: ${msg}`);
         }
+    }
+
+    /**
+     * Confirms a manual dose by the total counter of the pump (read after the pump had time to run).
+     *
+     * @param rt Runtime data of the dosing pump
+     * @param c Pump and amount
+     * @param c.pump Pump 1-4
+     * @param c.ml Dosed ml
+     * @param before Total counter before the dose
+     */
+    private async confirmDose(
+        rt: DeviceRuntime,
+        c: { pump: number; ml: number },
+        before: number | undefined,
+    ): Promise<void> {
+        const base = `devices.${rt.device.id}`;
+        const key = `pump${c.pump}.total`;
+        let after: ioBroker.StateValue | undefined;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            const wait = attempt === 1 ? DOSE_CONFIRM_DELAY_MS + c.ml * DOSE_MS_PER_ML : DOSE_CONFIRM_RETRY_MS;
+            await new Promise<void>(r => this.scheduler.setTimeout(r, wait));
+            if (this.stopping) {
+                return;
+            }
+            const values = await this.withGatt(() => this.readDevice(rt));
+            after = values?.[key];
+            if (typeof after === 'number' && typeof before === 'number' && after - before >= c.ml - 0.05) {
+                const msg = `confirmed: pump ${c.pump} total ${before} -> ${after} ml`;
+                await this.setState(`${base}.commandResult`, msg, true);
+                this.log.info(`${rt.device.name}: dose ${msg}`);
+                return;
+            }
+        }
+        const msg = `not confirmed: pump ${c.pump} total ${before ?? '?'} -> ${after ?? '?'} ml - please check the pump`;
+        await this.setState(`${base}.commandResult`, msg, true);
+        this.log.warn(`${rt.device.name}: dose ${c.ml} ml ${msg}`);
     }
 
     /**

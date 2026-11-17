@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { clockFrame, clockParams, CommandError, lightCommand, writeStates } from './commands';
+import { clockFrame, clockParams, CommandError, doserCommand, lightCommand, writeStates } from './commands';
 
 const CUR = { red: 133, green: 84, blue: 129, white: 65, on: true };
 
@@ -7,7 +7,14 @@ describe('commands', () => {
     it('defines the writable light states only for the light', () => {
         expect(writeStates('light').map(s => s.id)).to.deep.equal(['red', 'green', 'blue', 'white', 'on']);
         expect(writeStates('light').every(s => s.common.write)).to.equal(true);
-        expect(writeStates('doser')).to.deep.equal([]);
+        expect(writeStates('doser').map(s => s.id)).to.deep.equal([
+            'pump1.doseNow',
+            'pump2.doseNow',
+            'pump3.doseNow',
+            'pump4.doseNow',
+        ]);
+        expect(writeStates('doser')[0].common.max).to.equal(5);
+        expect(writeStates('fan')).to.deep.equal([]);
     });
 
     it('builds the clock frame like the app', () => {
@@ -74,5 +81,25 @@ describe('commands', () => {
             /set a colour first/,
         );
         expect(() => lightCommand('schedule', 'x', CUR)).to.throw(/not writable/);
+    });
+
+    it('builds the manual dose like the write test', () => {
+        // write test 16.11.2026: pump 2, 0.2 ml = a5/27 [01 00 00 00 02]
+        expect(doserCommand('pump2.doseNow', 0.2)).to.deep.equal({
+            label: 'pump 2: dose 0.2 ml',
+            frames: [[0xa5, 0x27, [1, 0, 0, 0, 2]]],
+            states: { 'pump2.doseNow': 0.2 },
+            confirm: { pump: 2, ml: 0.2 },
+        });
+        expect(doserCommand('pump3.doseNow', '5').frames).to.deep.equal([[0xa5, 0x27, [2, 0, 0, 0, 50]]]);
+        expect(doserCommand('pump1.doseNow', 1.04).confirm).to.deep.equal({ pump: 1, ml: 1 });
+    });
+
+    it('rejects doses outside 0.1-5 ml and unknown pumps', () => {
+        for (const v of [0, 0.04, 5.1, 100, -1, 'x', null, true]) {
+            expect(() => doserCommand('pump1.doseNow', v)).to.throw(CommandError);
+        }
+        expect(() => doserCommand('pump5.doseNow', 1)).to.throw(/not writable/);
+        expect(() => doserCommand('pump1.total', 1)).to.throw(/not writable/);
     });
 });

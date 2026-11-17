@@ -4,13 +4,18 @@
  * Sources: own captures and write tests (Nov 2026).
  */
 import type { DeviceType } from './devices';
-import { CMD_5A } from './protocol';
-import type { StateDef } from './states';
+import { CMD_5A, CMD_A5 } from './protocol';
+import { PUMPS, type StateDef } from './states';
 
 /** Mode byte: set the clock, params [year-2000, month, weekday 1=Mon..7=Sun, hour, minute, second] */
 export const MODE_CLOCK = 0x09;
 /** Mode byte: set one channel of the light, params [channel, value 0-255] */
 export const MODE_CHANNEL = 0x07;
+
+/** Mode byte (a5 family): manual dose, params [pump index 0-3, 0, 0, 0, ml x 10]; write test 16.11.2026 (0.2 ml) */
+export const MODE_DOSE = 0x27;
+/** Largest manual dose per command in ml (safety limit, Sven 17.11.2026) */
+export const MAX_DOSE_ML = 5;
 
 /** Light channels in device order (0=red, 1=green, 2=blue, 3=white; confirmed by write test) */
 export const LIGHT_CHANNELS = ['red', 'green', 'blue', 'white'] as const;
@@ -34,6 +39,8 @@ export interface CommandPlan {
     frames: RawFrame[];
     /** State values (relative ID) to set with ack after the frames were sent */
     states: Record<string, ioBroker.StateValue>;
+    /** Dosing pump: confirm the dose by the total counter of this pump (1-4) */
+    confirm?: { pump: number; ml: number };
 }
 
 /** States every writable device gets */
@@ -96,6 +103,22 @@ export function writeStates(type: DeviceType): StateDef[] {
                     },
                 },
             ];
+        case 'doser':
+            return Array.from({ length: PUMPS }, (_, i) => ({
+                id: `pump${i + 1}.doseNow`,
+                common: {
+                    name: `Pump ${i + 1}: dose now (ml, 0.1-${MAX_DOSE_ML})`,
+                    type: 'number',
+                    role: 'level',
+                    unit: 'ml',
+                    min: 0.1,
+                    max: MAX_DOSE_ML,
+                    step: 0.1,
+                    read: true,
+                    write: true,
+                    def: 0,
+                },
+            }));
         default:
             return [];
     }
@@ -170,4 +193,33 @@ export function lightCommand(
         };
     }
     throw new CommandError(`${id} is not writable`);
+}
+
+/**
+ * Builds the frame for a manual dose of the dosing pump.
+ *
+ * @param id Relative state ID (pumpN.doseNow)
+ * @param value Written value in ml
+ */
+export function doserCommand(id: string, value: ioBroker.StateValue): CommandPlan {
+    const m = /^pump([1-4])\.doseNow$/.exec(id);
+    if (!m) {
+        throw new CommandError(`${id} is not writable`);
+    }
+    const pump = Number(m[1]);
+    const v = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new CommandError(`invalid value ${JSON.stringify(value)} (0.1-${MAX_DOSE_ML} ml)`);
+    }
+    const tenths = Math.round(v * 10);
+    if (tenths < 1 || tenths > MAX_DOSE_ML * 10) {
+        throw new CommandError(`invalid amount ${v} ml (0.1-${MAX_DOSE_ML} ml)`);
+    }
+    const ml = tenths / 10;
+    return {
+        label: `pump ${pump}: dose ${ml} ml`,
+        frames: [[CMD_A5, MODE_DOSE, [pump - 1, 0, 0, 0, tenths]]],
+        states: { [id]: ml },
+        confirm: { pump, ml },
+    };
 }

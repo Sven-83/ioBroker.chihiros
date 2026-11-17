@@ -21,18 +21,24 @@ __export(commands_exports, {
   COMMON_COMMAND_STATES: () => COMMON_COMMAND_STATES,
   CommandError: () => CommandError,
   LIGHT_CHANNELS: () => LIGHT_CHANNELS,
+  MAX_DOSE_ML: () => MAX_DOSE_ML,
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
+  MODE_DOSE: () => MODE_DOSE,
   RESULT_UNCONFIRMED: () => RESULT_UNCONFIRMED,
   clockFrame: () => clockFrame,
   clockParams: () => clockParams,
+  doserCommand: () => doserCommand,
   lightCommand: () => lightCommand,
   writeStates: () => writeStates
 });
 module.exports = __toCommonJS(commands_exports);
 var import_protocol = require("./protocol");
+var import_states = require("./states");
 const MODE_CLOCK = 9;
 const MODE_CHANNEL = 7;
+const MODE_DOSE = 39;
+const MAX_DOSE_ML = 5;
 const LIGHT_CHANNELS = ["red", "green", "blue", "white"];
 const RESULT_UNCONFIRMED = "sent, not confirmed (the device does not report this value)";
 class CommandError extends Error {
@@ -89,6 +95,22 @@ function writeStates(type) {
           }
         }
       ];
+    case "doser":
+      return Array.from({ length: import_states.PUMPS }, (_, i) => ({
+        id: `pump${i + 1}.doseNow`,
+        common: {
+          name: `Pump ${i + 1}: dose now (ml, 0.1-${MAX_DOSE_ML})`,
+          type: "number",
+          role: "level",
+          unit: "ml",
+          min: 0.1,
+          max: MAX_DOSE_ML,
+          step: 0.1,
+          read: true,
+          write: true,
+          def: 0
+        }
+      }));
     default:
       return [];
   }
@@ -133,16 +155,41 @@ function lightCommand(id, value, current) {
   }
   throw new CommandError(`${id} is not writable`);
 }
+function doserCommand(id, value) {
+  const m = /^pump([1-4])\.doseNow$/.exec(id);
+  if (!m) {
+    throw new CommandError(`${id} is not writable`);
+  }
+  const pump = Number(m[1]);
+  const v = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new CommandError(`invalid value ${JSON.stringify(value)} (0.1-${MAX_DOSE_ML} ml)`);
+  }
+  const tenths = Math.round(v * 10);
+  if (tenths < 1 || tenths > MAX_DOSE_ML * 10) {
+    throw new CommandError(`invalid amount ${v} ml (0.1-${MAX_DOSE_ML} ml)`);
+  }
+  const ml = tenths / 10;
+  return {
+    label: `pump ${pump}: dose ${ml} ml`,
+    frames: [[import_protocol.CMD_A5, MODE_DOSE, [pump - 1, 0, 0, 0, tenths]]],
+    states: { [id]: ml },
+    confirm: { pump, ml }
+  };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   COMMON_COMMAND_STATES,
   CommandError,
   LIGHT_CHANNELS,
+  MAX_DOSE_ML,
   MODE_CHANNEL,
   MODE_CLOCK,
+  MODE_DOSE,
   RESULT_UNCONFIRMED,
   clockFrame,
   clockParams,
+  doserCommand,
   lightCommand,
   writeStates
 });

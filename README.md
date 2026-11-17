@@ -12,7 +12,7 @@ Connects Chihiros aquarium devices (WRGB II light, dosing pump, CO2 controller, 
 
 German description: [docs/de/README.md](docs/de/README.md)
 
-Status: early version. Reading all devices; controlling the light. More commands follow in the next versions.
+Status: early version. Reading all devices; controlling the light and manual doses of the dosing pump. More commands follow in the next versions.
 
 ### What it does (so far)
 
@@ -27,6 +27,7 @@ Status: early version. Reading all devices; controlling the light. More commands
   - Fan: water and room temperature, humidity
   - CO2 controller: reachable only (it reports no valve state)
 - **Controls** the light: red, green, blue, white (0-255) and on/off. Commands wait for a running read and are sent in their own short connection (login, clock, command). The light does not report these values back: the states show what this adapter set last (`commandResult` says "sent, not confirmed"). Changes made in the app are not seen.
+- **Manual dose** of the dosing pump: write ml (0.1-5 per command, safety limit) to `pumpN.doseNow`. About 15 s plus 6 s per ml later the adapter reads the total counter: `commandResult` says "confirmed: pump N total a -> b ml" or "not confirmed".
 - **Sets the device clocks** (can be switched off): the light when its clock differs by 2 minutes or more, the other devices after the adapter start, when they are heard again (e.g. after a power cut) and once a day. Every command also sets the clock, like the app.
 
 ### Requirements
@@ -67,6 +68,7 @@ Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY�
 | `devices.<light>.schedulePoints` / `.scheduledLevel` | Light: schedule points (JSON) and the red level by schedule now (green, blue, white are not reported) |
 | `devices.<light>.red` / `.green` / `.blue` / `.white` | Light: channel values 0-255, **writable** (last value set by this adapter) |
 | `devices.<light>.on` | Light: **writable**; false = all channels 0, true = all channels to the values above |
+| `devices.<pump>.pumpN.doseNow` | Dosing pump: **writable**, dose this many ml now (0.1-5) |
 | `devices.<name>.lastCommand` / `.commandResult` | Last command and its result (`sent, not confirmed` or `error: ...`) |
 | `devices.<doctor>.waterTemp` | Doctor: water temperature in °C |
 | `devices.<fan>.waterTemp` / `.roomTemp` / `.humidity` | Fan: water and room temperature in °C, humidity in % |
@@ -96,6 +98,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 - (Sven-83) read values of dosing pump, light, Doctor and fan in short GATT sessions (read only)
 - (Sven-83) light: on times including sunrise/sunset as in the app, new states `sunrise`/`sunset`; `scheduledLevel` is the red channel only
 - (Sven-83) control the light (red, green, blue, white, on/off) through a command queue; set the device clocks
+- (Sven-83) manual dose of the dosing pump (max. 5 ml), confirmed by the total counter
 
 ### 0.0.1 (2026-11-17)
 
