@@ -3,6 +3,7 @@
  * Phase 1: proxy connection and presence of the configured devices.
  * Phase 2: reads the values of all devices one after the other in short GATT sessions.
  * Phase 3: commands (allowlist per device type) through a queue shared with the read rounds; sets device clocks.
+ * Phase 4: fertiliser stock per pump, water temperature limits and the automatic fan (settings as writable states).
  */
 import * as utils from '@iobroker/adapter-core';
 import { Connection } from '@2colors/esphome-native-api';
@@ -23,11 +24,29 @@ import {
     RESULT_UNCONFIRMED,
     writeStates,
 } from './lib/commands';
+import {
+    AQUARIUM_STATES,
+    dailyDose,
+    dayKey,
+    daysLeft,
+    doserCareStates,
+    FAN_AUTO_STATES,
+    type FanAuto,
+    fanAutoAction,
+    isLow,
+    parseStock,
+    refill,
+    remaining,
+    type Stock,
+    tempAlarm,
+    updateStock,
+    validateSetting,
+} from './lib/care';
 import { FAN_KICK_LEVELS, isOn, POWER_OFF_W, powerIndicator } from './lib/power';
 import { encodeFrame, MessageIds, MSG, QUERY } from './lib/protocol';
 import { type Advertisement, type ApiConnection, type ProxyConfig, ProxyClient, type Scheduler } from './lib/proxy';
 import { clockDeviation, interpret, readPlan } from './lib/reader';
-import { COMMON_READ_STATES, readChannels, readStates, resultToStates } from './lib/states';
+import { COMMON_READ_STATES, PUMPS, readChannels, readStates, resultToStates, type StateDef } from './lib/states';
 
 const EVALUATE_MS = 15_000;
 /** RSSI is written at most this often per device */
@@ -51,6 +70,8 @@ const CO2_CHECK_DELAY_MS = 10_000;
 const FAN_CHECK_DELAY_MS = 10_000;
 /** Fan: wait after each kick level before the power is checked */
 const FAN_KICK_STEP_MS = 4_000;
+/** Automatic fan: a failed switch is tried again after this time at the earliest */
+const FAN_AUTO_RETRY_MS = 30 * 60_000;
 
 const TYPE_NAMES: Record<Device['type'], string> = {
     light: 'Light',
@@ -82,6 +103,12 @@ interface DeviceRuntime {
     powerOn?: boolean;
     /** Counts the commands; a running confirmation stops when a newer command came */
     commandSeq: number;
+    /** Fan: the automatic switched it on */
+    autoActive: boolean;
+    /** Fan: set by hand while the automatic was on - the automatic waits until the water is cool again */
+    autoHold: boolean;
+    /** Fan: last switch attempt of the automatic */
+    autoTriedAt: number;
 }
 
 class Chihiros extends utils.Adapter {
@@ -101,6 +128,13 @@ class Chihiros extends utils.Adapter {
     private gattChain: Promise<void> = Promise.resolve();
     /** Power state ID -> device */
     private readonly powerStates = new Map<string, DeviceRuntime>();
+    /** Writable settings (ID relative to the namespace) and their current values */
+    private readonly settingDefs = new Map<string, StateDef>();
+    private readonly settingVals = new Map<string, ioBroker.StateValue>();
+    /** Pumps whose bottle is almost empty: "<device>.<pump>" -> text */
+    private readonly lowPumps = new Map<string, string>();
+    private lastWaterTemp: number | undefined = undefined;
+    private lastTempAlarm: string | undefined = undefined;
     private readonly scheduler: Scheduler = {
         setTimeout: (cb, ms) => this.setTimeout(cb, ms),
         clearTimeout: h => this.clearTimeout(h as ioBroker.Timeout),
@@ -131,6 +165,7 @@ class Chihiros extends utils.Adapter {
         }
         await this.syncDeviceObjects(devices);
         await this.subscribeStatesAsync('devices.*');
+        await this.subscribeStatesAsync('aquarium.*');
         for (const rt of this.runtime.values()) {
             const id = rt.device.powerState;
             if (id && powerIndicator(rt.device.type)) {
@@ -200,6 +235,14 @@ class Chihiros extends utils.Adapter {
             },
             native: {},
         });
+        await this.extendObject('aquarium', {
+            type: 'channel',
+            common: { name: 'Aquarium (limits and warnings)' },
+            native: {},
+        });
+        await this.createCareStates('aquarium', AQUARIUM_STATES);
+        const alarm = await this.getStateAsync('aquarium.tempAlarm');
+        this.lastTempAlarm = typeof alarm?.val === 'string' ? alarm.val : undefined;
         await this.setObjectNotExistsAsync('devices', {
             type: 'folder',
             common: { name: 'Devices' },
@@ -280,6 +323,12 @@ class Chihiros extends utils.Adapter {
                 const cur = await this.getStateAsync(`devices.${d.id}.${st.id}`);
                 values[st.id] = cur?.val ?? st.common.def ?? null;
             }
+            if (d.type === 'doser') {
+                await this.createCareStates(`devices.${d.id}`, doserCareStates());
+            } else if (d.type === 'fan') {
+                await this.createCareStates(`devices.${d.id}`, FAN_AUTO_STATES);
+            }
+            const autoActive = await this.getStateAsync(`devices.${d.id}.autoActive`);
             const lastSeen = await this.getStateAsync(`devices.${d.id}.lastSeen`);
             this.runtime.set(d.macNum, {
                 device: d,
@@ -294,6 +343,9 @@ class Chihiros extends utils.Adapter {
                 clockReason: '',
                 values,
                 commandSeq: 0,
+                autoActive: d.type === 'fan' && autoActive?.val === true,
+                autoHold: false,
+                autoTriedAt: 0,
             });
             const indicator = powerIndicator(d.type);
             if (indicator && d.powerState) {
@@ -317,6 +369,236 @@ class Chihiros extends utils.Adapter {
                 this.log.info(`device ${id} is no longer configured - removing its objects`);
                 await this.delObjectAsync(`devices.${id}`, { recursive: true });
             }
+        }
+    }
+
+    /**
+     * Creates setting and value states; settings without a value get their default (ack).
+     *
+     * @param prefix Object ID prefix relative to the namespace
+     * @param defs Settings and values
+     * @param defs.settings Writable settings
+     * @param defs.values Calculated values
+     */
+    private async createCareStates(prefix: string, defs: { settings: StateDef[]; values: StateDef[] }): Promise<void> {
+        for (const st of [...defs.settings, ...defs.values]) {
+            await this.extendObject(`${prefix}.${st.id}`, { type: 'state', common: st.common, native: {} });
+        }
+        for (const st of defs.settings) {
+            const id = `${prefix}.${st.id}`;
+            this.settingDefs.set(id, st);
+            if (st.common.role === 'button') {
+                continue;
+            }
+            const cur = await this.getStateAsync(id);
+            let val = cur?.val ?? null;
+            if (val === null && st.common.def !== undefined) {
+                val = st.common.def;
+                await this.setState(id, val, true);
+            }
+            this.settingVals.set(id, val);
+        }
+    }
+
+    /**
+     * Number setting with fallback.
+     *
+     * @param id Setting ID relative to the namespace
+     * @param fallback Value when missing
+     */
+    private settingNum(id: string, fallback: number): number {
+        const v = this.settingVals.get(id);
+        return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+    }
+
+    /**
+     * Handles a written setting: validate, confirm with ack, apply.
+     *
+     * @param id Setting ID relative to the namespace
+     * @param val Written value
+     */
+    private async onSetting(id: string, val: ioBroker.StateValue): Promise<void> {
+        const def = this.settingDefs.get(id);
+        if (!def) {
+            return;
+        }
+        try {
+            const pump = /^devices\.([^.]+)\.pump(\d)\.refilled$/.exec(id);
+            if (pump) {
+                if (val === true || val === 'true' || val === 1) {
+                    await this.onRefilled(pump[1], Number(pump[2]));
+                }
+                await this.setState(id, true, true);
+                return;
+            }
+            const v = validateSetting(def, val);
+            this.settingVals.set(id, v);
+            await this.setState(id, v, true);
+            this.log.info(`setting ${id} = ${JSON.stringify(v)}`);
+            if (id.startsWith('aquarium.temp') || /\.(auto|autoOnTemp|autoOffTemp|autoLevel)$/.test(id)) {
+                if (this.lastWaterTemp !== undefined) {
+                    await this.onWaterTemp(this.lastWaterTemp);
+                }
+            } else if (id === 'aquarium.warnDays' || /\.pump\d\.label$/.test(id)) {
+                for (const rt of this.runtime.values()) {
+                    if (rt.device.type === 'doser') {
+                        for (let p = 1; p <= PUMPS; p++) {
+                            await this.writeStock(rt, p, await this.loadStock(rt, p));
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            this.log.warn(`setting ${id} not accepted: ${(e as Error).message}`);
+            await this.setState(id, this.settingVals.get(id) ?? null, true);
+        }
+    }
+
+    /**
+     * Stored stock calculation of a pump.
+     *
+     * @param rt Dosing pump
+     * @param p Pump 1-4
+     */
+    private async loadStock(rt: DeviceRuntime, p: number): Promise<Stock> {
+        const st = await this.getStateAsync(`devices.${rt.device.id}.pump${p}.stock`);
+        return parseStock(st?.val);
+    }
+
+    /**
+     * Stores the stock calculation and writes the derived values; logs when a bottle becomes low.
+     *
+     * @param rt Dosing pump
+     * @param p Pump 1-4
+     * @param stock Stock
+     */
+    private async writeStock(rt: DeviceRuntime, p: number, stock: Stock): Promise<void> {
+        const base = `devices.${rt.device.id}.pump${p}`;
+        const rest = remaining(stock);
+        const daily = dailyDose(stock);
+        const days = daysLeft(rest, daily);
+        const low = isLow(days, this.settingNum('aquarium.warnDays', 7));
+        await this.setState(`${base}.stock`, JSON.stringify(stock), true);
+        await this.setState(`${base}.remaining`, rest, true);
+        await this.setState(`${base}.dailyDose`, daily, true);
+        await this.setState(`${base}.daysLeft`, days, true);
+        const key = `${rt.device.id}.${p}`;
+        const label = this.settingVals.get(`${base}.label`);
+        const name = `pump ${p}${typeof label === 'string' && label ? ` (${label})` : ''}`;
+        const was = this.lowPumps.has(key);
+        if (low) {
+            this.lowPumps.set(key, `${name}: ${days} d, ${rest} ml`);
+        } else {
+            this.lowPumps.delete(key);
+        }
+        if (low !== was) {
+            if (low) {
+                this.log.warn(`${rt.device.name}: ${name} lasts only ${days} more day(s) (${rest} ml) - please refill`);
+            } else {
+                this.log.info(`${rt.device.name}: ${name} ok again (${rest} ml)`);
+            }
+        }
+        await this.setState(`${base}.low`, low, true);
+        await this.setState('aquarium.fertiliserLow', [...this.lowPumps.values()].join('; '), true);
+    }
+
+    /**
+     * Updates the stock of all pumps after a read.
+     *
+     * @param rt Dosing pump
+     * @param values Read values
+     * @param now Time of the read
+     */
+    private async updateDoserCare(
+        rt: DeviceRuntime,
+        values: Record<string, ioBroker.StateValue>,
+        now: Date,
+    ): Promise<void> {
+        for (let p = 1; p <= PUMPS; p++) {
+            const total = values[`pump${p}.total`];
+            const today = values[`pump${p}.today`];
+            if (typeof total !== 'number' || typeof today !== 'number') {
+                continue;
+            }
+            const { stock, reset } = updateStock(await this.loadStock(rt, p), total, today, dayKey(now));
+            if (reset) {
+                this.log.info(
+                    `${rt.device.name}: pump ${p} counter was reset by the device (refilled in the app?) - remaining kept at ${
+                        remaining(stock) ?? '?'
+                    } ml; press pump${p}.refilled after refilling`,
+                );
+            }
+            await this.writeStock(rt, p, stock);
+        }
+    }
+
+    /**
+     * Bottle refilled (button).
+     *
+     * @param devId Device ID
+     * @param p Pump 1-4
+     */
+    private async onRefilled(devId: string, p: number): Promise<void> {
+        const rt = [...this.runtime.values()].find(r => r.device.id === devId && r.device.type === 'doser');
+        if (!rt || p < 1 || p > PUMPS) {
+            return;
+        }
+        const base = `devices.${devId}.pump${p}`;
+        const amount = this.settingNum(`${base}.refillAmount`, 450);
+        const before = await this.loadStock(rt, p);
+        const stock = refill(before, before.lastTotal, amount);
+        await this.setState(`${base}.refilledAt`, Date.now(), true);
+        await this.writeStock(rt, p, stock);
+        this.log.info(`${rt.device.name}: pump ${p} refilled to ${amount} ml`);
+    }
+
+    /**
+     * New water temperature (Doctor): limits and the automatic fan.
+     *
+     * @param temp Water temperature
+     */
+    private async onWaterTemp(temp: number): Promise<void> {
+        this.lastWaterTemp = temp;
+        await this.setState('aquarium.waterTemp', temp, true);
+        const min = this.settingNum('aquarium.tempMin', 20);
+        const max = this.settingNum('aquarium.tempMax', 28);
+        const alarm = tempAlarm(temp, min, max);
+        if (alarm !== this.lastTempAlarm) {
+            if (alarm) {
+                this.log.warn(`water temperature ${temp} °C is too ${alarm} (limits ${min}-${max} °C)`);
+            } else if (this.lastTempAlarm) {
+                this.log.info(`water temperature ${temp} °C is within the limits again`);
+            }
+            this.lastTempAlarm = alarm;
+            await this.setState('aquarium.tempAlarm', alarm, true);
+        }
+        const fan = [...this.runtime.values()].find(r => r.device.type === 'fan');
+        if (!fan) {
+            return;
+        }
+        const base = `devices.${fan.device.id}`;
+        const cfg: FanAuto = {
+            enabled: this.settingVals.get(`${base}.auto`) === true,
+            onTemp: this.settingNum(`${base}.autoOnTemp`, 26),
+            offTemp: this.settingNum(`${base}.autoOffTemp`, 25.5),
+            level: this.settingNum(`${base}.autoLevel`, 11),
+        };
+        if (fan.autoHold && temp <= Math.min(cfg.offTemp, cfg.onTemp - 0.1)) {
+            fan.autoHold = false;
+            this.log.info(`${fan.device.name}: water cool again - the automatic takes over again`);
+        }
+        const action = fanAutoAction(temp, cfg, fan.autoActive, fan.autoHold);
+        if (!action || Date.now() - fan.autoTriedAt < FAN_AUTO_RETRY_MS) {
+            return;
+        }
+        fan.autoTriedAt = Date.now();
+        this.log.info(
+            `${fan.device.name}: automatic - water ${temp} °C, switching ${action === 'on' ? `on (level ${cfg.level})` : 'off'}`,
+        );
+        if (await this.runCommand(fan, 'level', action === 'on' ? cfg.level : 0, 'auto')) {
+            fan.autoActive = action === 'on';
+            fan.autoTriedAt = 0;
+            await this.setState(`${base}.autoActive`, fan.autoActive, true);
         }
     }
 
@@ -476,6 +758,18 @@ class Chihiros extends utils.Adapter {
             }
             rt.readFailures = 0;
             this.log.debug(`${d.name}: ${JSON.stringify(values)}`);
+            try {
+                if (d.type === 'doser') {
+                    await this.updateDoserCare(rt, values, now);
+                } else if (d.type === 'doctor' && typeof values.waterTemp === 'number') {
+                    // not awaited: a fan command queues behind this read session (awaiting would deadlock)
+                    this.onWaterTemp(values.waterTemp).catch(e =>
+                        this.log.warn(`water temperature handling failed: ${(e as Error).message}`),
+                    );
+                }
+            } catch (e) {
+                this.log.warn(`${d.name}: calculation failed: ${(e as Error).message}`);
+            }
             return values;
         } catch (e) {
             if (this.stopping) {
@@ -546,6 +840,11 @@ class Chihiros extends utils.Adapter {
         if (!state || state.ack || this.stopping) {
             return;
         }
+        const rel = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : '';
+        if (this.settingDefs.has(rel)) {
+            void this.onSetting(rel, state.val);
+            return;
+        }
         const prefix = `${this.namespace}.devices.`;
         if (!id.startsWith(prefix)) {
             return;
@@ -601,15 +900,28 @@ class Chihiros extends utils.Adapter {
      * @param rt Runtime data of the device
      * @param stateId Relative state ID
      * @param value Written value
+     * @param source Written by the user or by the automatic fan
+     * @returns true when the command was sent
      */
-    private async runCommand(rt: DeviceRuntime, stateId: string, value: ioBroker.StateValue): Promise<void> {
+    private async runCommand(
+        rt: DeviceRuntime,
+        stateId: string,
+        value: ioBroker.StateValue,
+        source: 'user' | 'auto' = 'user',
+    ): Promise<boolean> {
         const d = rt.device;
         const base = `devices.${d.id}`;
         const seq = ++rt.commandSeq;
         let plan: CommandPlan | undefined;
+        if (d.type === 'fan' && source === 'user' && rt.autoActive) {
+            rt.autoActive = false;
+            rt.autoHold = true;
+            await this.setState(`${base}.autoActive`, false, true);
+            this.log.info(`${d.name}: set by hand - the automatic waits until the water is cool again`);
+        }
         try {
             plan = this.buildPlan(rt, stateId, value);
-            await this.setState(`${base}.lastCommand`, plan.label, true);
+            await this.setState(`${base}.lastCommand`, `${plan.label}${source === 'auto' ? ' (automatic)' : ''}`, true);
             if (!this.proxy?.connection) {
                 throw new CommandError('proxy not connected');
             }
@@ -641,9 +953,10 @@ class Chihiros extends utils.Adapter {
             } else {
                 await this.setState(`${base}.commandResult`, acked ? RESULT_UNCONFIRMED : RESULT_UNACKED, true);
             }
+            return true;
         } catch (e) {
             if (this.stopping) {
-                return;
+                return false;
             }
             const busy = e instanceof SessionError && e.busy;
             const msg = `${(e as Error).message}${busy ? ' - held by the app/hub?' : ''}`;
@@ -654,6 +967,7 @@ class Chihiros extends utils.Adapter {
             // the device keeps its old value: show it again
             await this.setState(`${base}.${stateId}`, rt.values[stateId] ?? null, true);
             this.log.warn(`${d.name}: ${plan?.label ?? stateId} failed: ${msg}`);
+            return false;
         }
     }
 

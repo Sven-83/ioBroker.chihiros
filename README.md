@@ -12,7 +12,7 @@ Connects Chihiros aquarium devices (WRGB II light, dosing pump, CO2 controller, 
 
 German description: [docs/de/README.md](docs/de/README.md)
 
-Status: early version. Reading all devices; controlling the light, manual doses of the dosing pump, the fan level, CO2 on/off and the Doctor mode. More commands follow in the next versions.
+Status: early version. Reading all devices; controlling the light, manual doses of the dosing pump, the fan level, CO2 on/off and the Doctor mode; fertiliser stock, water temperature limits and an automatic fan. More commands follow in the next versions.
 
 ### What it does (so far)
 
@@ -32,6 +32,9 @@ Status: early version. Reading all devices; controlling the light, manual doses 
 - **CO2 on/off** in `on`: on = schedule of the controller 00:00-23:59 (valve open all day), off = schedule empty. This overwrites the schedule set in the app. With a power state the adapter checks 10 s later whether the valve followed (open from 1 W). The plug of the controller must always stay on: CO2 is switched by Bluetooth only, never by the plug.
 - **Doctor mode** in `mode`: `fish` or `shrimp` (frames from a capture of the app). The Doctor does not report its mode: the state shows what this adapter set last.
 - **Power measurement** (optional, fan and CO2 controller): with a power state per device (e.g. a Shelly plug, only read, never switched) the adapter shows `running` (fan, from 0.5 W) or `valveOpen` (CO2, from 1 W). After every fan level command it checks the power 10 s later; if the fan did not start, it kicks it like in the app: levels 20, 11, 4, 20, 11, each in its own connection with a power check, then the wanted level (about 1 minute at most). Like the app, every fan command first sends the two queries a5/04 [06] and [08]. `commandResult` says "confirmed: running", "confirmed after kick" or "not running after 5 kick steps" (warning).
+- **Fertiliser stock** per pump: after refilling a bottle press `pumpN.refilled`; the adapter then counts down from `pumpN.refillAmount` (default 450 ml, changeable) by the total counter of the pump. The daily dose is learned from the last 7 days (before the first full day: today's dose). `daysLeft` and `low` (lasts at most `aquarium.warnDays` days, default 7). When the app resets the counter (refill in the app), the remaining amount stays continuous until `refilled` is pressed.
+- **Water temperature limits** from the Doctor: `aquarium.tempMin` / `tempMax` (default 20 / 28 °C) give `aquarium.tempAlarm` (`low`, `high` or empty).
+- **Automatic fan** (off by default): with `devices.<fan>.auto` the fan switches on at `autoOnTemp` (default 26 °C, Doctor water temperature) with level `autoLevel` (11) and off again at `autoOffTemp` (25.5 °C). It only switches off what it switched on; when the fan is set by hand, the automatic waits until the water is cool again.
 - **Sets the device clocks** (can be switched off): the light when its clock differs by 2 minutes or more, the other devices after the adapter start, when they are heard again (e.g. after a power cut) and once a day. Every command also sets the clock, like the app.
 
 ### Requirements
@@ -80,6 +83,14 @@ Find the MAC addresses with any BLE scanner; Chihiros devices advertise as `DY�
 | `devices.<name>.lastCommand` / `.commandResult` | Last command and its result (`sent, not confirmed` or `error: ...`) |
 | `devices.<doctor>.waterTemp` | Doctor: water temperature in °C |
 | `devices.<fan>.waterTemp` / `.roomTemp` / `.humidity` | Fan: water and room temperature in °C, humidity in % |
+| `devices.<pump>.pumpN.label` / `.refillAmount` | **Writable**: content of the bottle (free text) / ml after refilling (default 450) |
+| `devices.<pump>.pumpN.refilled` | Button: bottle refilled |
+| `devices.<pump>.pumpN.remaining` / `.dailyDose` / `.daysLeft` / `.low` | Calculated stock, daily dose (average of 7 days), days left, almost empty |
+| `devices.<pump>.pumpN.refilledAt` / `.stock` | Last refill / internal calculation (JSON) |
+| `aquarium.tempMin` / `.tempMax` / `.warnDays` | **Writable** limits (20 °C / 28 °C / 7 days) |
+| `aquarium.waterTemp` / `.tempAlarm` / `.fertiliserLow` | Water temperature (Doctor), `low`/`high`/empty, text of the bottles almost empty |
+| `devices.<fan>.auto` / `.autoOnTemp` / `.autoOffTemp` / `.autoLevel` | **Writable** automatic fan (off / 26 °C / 25.5 °C / 11) |
+| `devices.<fan>.autoActive` | The automatic switched the fan on |
 
 ### Security
 
@@ -112,6 +123,7 @@ captures. Chihiros is a trademark of its owner; this project is not affiliated w
 - (Sven-83) CO2 on/off through the schedule of the controller, checked by the power
 - (Sven-83) Doctor mode fish/shrimp
 - (Sven-83) optional power state per device: fan running / CO2 valve open; fan commands checked by the power, kick when the fan does not start
+- (Sven-83) fertiliser stock per pump (refill button, days left, low), water temperature limits, automatic fan by the Doctor water temperature
 
 ### 0.0.1 (2026-11-17)
 
