@@ -125,7 +125,7 @@ function decodeDoserPlan(a) {
     if (h > 23 || m > 59) {
       return null;
     }
-    out.push({ on: p[b] === 0, minute: h * 60 + m, ml: u16(p, b + 7) / 10 });
+    out.push({ on: p[b] === 0, minute: h * 60 + m });
   }
   return out;
 }

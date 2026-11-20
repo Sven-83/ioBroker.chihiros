@@ -152,14 +152,13 @@ export interface DoserPlan {
     on: boolean;
     /** Dosing time in minutes after midnight */
     minute: number;
-    /** Daily amount in ml */
-    ml: number;
 }
 
 /**
  * Decodes the daily dose per pump from the status image 0xfe of the dosing pump: clock at payload bytes 1-2,
- * then one 9-byte block per pump from byte 3: [flag, hour, minute, 4 unknown bytes, ml x 10 (uint16)].
- * The weekdays of a plan are not part of the image (capture 20.11.2026).
+ * then one 9-byte block per pump from byte 3: [flag, hour, minute, 4 unknown bytes, dosed today ml x 10 (uint16)].
+ * Daily amount and weekdays of a plan are NOT part of the image: the last two bytes are the amount dosed today
+ * (second capture 20.11.2026: 5.5 after a top-up while the plan said 5).
  *
  * @param a Answer of type 0xfe from the dosing pump
  */
@@ -176,7 +175,7 @@ export function decodeDoserPlan(a: Answer): DoserPlan[] | null {
         if (h > 23 || m > 59) {
             return null;
         }
-        out.push({ on: p[b] === 0, minute: h * 60 + m, ml: u16(p, b + 7) / 10 });
+        out.push({ on: p[b] === 0, minute: h * 60 + m });
     }
     return out;
 }

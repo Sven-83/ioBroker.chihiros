@@ -25,7 +25,7 @@ export const MODE_PLAN_ACTIVE = 0x20;
 export const MODE_PLAN_DOSE = 0x1b;
 /** Mode byte (a5 family): dosing time, params [pump index, 0, hour, minute, 0, 0] */
 export const MODE_PLAN_TIME = 0x15;
-/** All weekdays (0x7f); the app sent 0x1f for a plan on five days (bit order still to confirm) */
+/** Weekdays bit mask: Monday 0x40 ... Sunday 0x01, every day 0x7f (capture 20.11.2026: Mo-Fr = 0x7c) */
 export const ALL_DAYS = 0x7f;
 /** Largest daily dose in ml (safety limit) */
 export const MAX_PLAN_ML = 30;
@@ -73,7 +73,7 @@ export interface CommandPlan {
     /** Dosing pump: confirm the dose by the total counter of this pump (1-4) */
     confirm?: { pump: number; ml: number };
     /** Dosing pump: confirm a daily dose plan by reading the status image back */
-    confirmPlan?: { pump: number; on: boolean; time: string; ml: number };
+    confirmPlan?: { pump: number; on: boolean; time: string };
 }
 
 /** States every writable device gets */
@@ -141,7 +141,7 @@ export function writeStates(type: DeviceType): StateDef[] {
                 {
                     id: `pump${i + 1}.plan`,
                     common: {
-                        name: `Pump ${i + 1}: daily dose plan as JSON {"on":true,"time":"14:00","ml":5,"days":127} (days: bit mask, 127 = every day)`,
+                        name: `Pump ${i + 1}: daily dose plan as JSON {"on":true,"time":"14:00","ml":5,"days":127} (days: Mon 64 ... Sun 1; amount and days are not reported by the pump)`,
                         type: 'string',
                         role: 'json',
                         read: true,
@@ -376,8 +376,9 @@ export function planConflict(slot: PlanSlot, others: PlanSlot[]): PlanSlot | nul
 }
 
 /**
- * Builds the frames for the daily dose plan of a pump (capture 20.11.2026): on = channel on, weekdays + amount,
- * time; off = channel off. The pump reports time and amount back in its status image, not the weekdays.
+ * Builds the frames for the daily dose plan of a pump (captures 20.11.2026): on = channel on, weekdays + amount,
+ * time; off = channel off. The pump reports on/off and the time back, not the amount and the weekdays.
+ * Unlike the app no top-up of the difference is dosed when the amount grows after today's dose.
  *
  * @param pump Pump 1-4
  * @param id Relative state ID (pumpN.plan)
@@ -399,7 +400,7 @@ export function planCommand(pump: number, id: string, value: ioBroker.StateValue
             label: `pump ${pump}: daily dose off`,
             frames: [[CMD_A5, MODE_PLAN_ACTIVE, [ch, 0, 0]]],
             states: { [id]: JSON.stringify({ on: false }) },
-            confirmPlan: { pump, on: false, time: '', ml: 0 },
+            confirmPlan: { pump, on: false, time: '' },
         };
     }
     const t = typeof p.time === 'string' ? /^(\d{1,2}):(\d{2})$/.exec(p.time) : null;
@@ -426,7 +427,7 @@ export function planCommand(pump: number, id: string, value: ioBroker.StateValue
             [CMD_A5, MODE_PLAN_TIME, [ch, 0, hour, minute, 0, 0]],
         ],
         states: { [id]: JSON.stringify({ on: true, time, ml: tenths / 10, days }) },
-        confirmPlan: { pump, on: true, time, ml: tenths / 10 },
+        confirmPlan: { pump, on: true, time },
     };
 }
 

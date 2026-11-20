@@ -135,7 +135,7 @@ function writeStates(type) {
         {
           id: `pump${i + 1}.plan`,
           common: {
-            name: `Pump ${i + 1}: daily dose plan as JSON {"on":true,"time":"14:00","ml":5,"days":127} (days: bit mask, 127 = every day)`,
+            name: `Pump ${i + 1}: daily dose plan as JSON {"on":true,"time":"14:00","ml":5,"days":127} (days: Mon 64 ... Sun 1; amount and days are not reported by the pump)`,
             type: "string",
             role: "json",
             read: true,
@@ -315,7 +315,7 @@ function planCommand(pump, id, value) {
       label: `pump ${pump}: daily dose off`,
       frames: [[import_protocol.CMD_A5, MODE_PLAN_ACTIVE, [ch, 0, 0]]],
       states: { [id]: JSON.stringify({ on: false }) },
-      confirmPlan: { pump, on: false, time: "", ml: 0 }
+      confirmPlan: { pump, on: false, time: "" }
     };
   }
   const t = typeof p.time === "string" ? /^(\d{1,2}):(\d{2})$/.exec(p.time) : null;
@@ -342,7 +342,7 @@ function planCommand(pump, id, value) {
       [import_protocol.CMD_A5, MODE_PLAN_TIME, [ch, 0, hour, minute, 0, 0]]
     ],
     states: { [id]: JSON.stringify({ on: true, time, ml: tenths / 10, days }) },
-    confirmPlan: { pump, on: true, time, ml: tenths / 10 }
+    confirmPlan: { pump, on: true, time }
   };
 }
 function fanCommand(id, value) {

@@ -38,6 +38,15 @@ const FIRST_READ_DELAY_MS = 2e4;
 const SESSION_TIMEOUT_MS = 12e3;
 const CLOCK_MAX_DEVIATION_MIN = 2;
 const CLOCK_REFRESH_MS = 24 * 36e5;
+const UNKNOWN_PLAN_ML = 10;
+function mlOfPlan(raw) {
+  try {
+    const p = typeof raw === "string" && raw ? JSON.parse(raw) : {};
+    return typeof p.ml === "number" ? p.ml : UNKNOWN_PLAN_ML;
+  } catch {
+    return UNKNOWN_PLAN_ML;
+  }
+}
 const PLAN_CONFIRM_DELAY_MS = 3e3;
 const DOSE_CONFIRM_DELAY_MS = 15e3;
 const DOSE_MS_PER_ML = 6e3;
@@ -886,23 +895,23 @@ class Chihiros extends utils.Adapter {
    * @param plan Command plan of the write
    */
   async checkNoParallelDose(rt, plan) {
-    var _a, _b, _c;
+    var _a, _b;
     const base = `devices.${rt.device.id}`;
     const slots = [];
     for (let p = 1; p <= import_states.PUMPS; p++) {
       const on = (_a = await this.getStateAsync(`${base}.pump${p}.planOn`)) == null ? void 0 : _a.val;
       const time = (_b = await this.getStateAsync(`${base}.pump${p}.planTime`)) == null ? void 0 : _b.val;
-      const ml = (_c = await this.getStateAsync(`${base}.pump${p}.planMl`)) == null ? void 0 : _c.val;
       const m = typeof time === "string" ? /^(\d{2}):(\d{2})$/.exec(time) : null;
-      if (on === true && m && typeof ml === "number") {
-        slots.push({ pump: p, minute: Number(m[1]) * 60 + Number(m[2]), ml });
+      if (on === true && m) {
+        slots.push({ pump: p, minute: Number(m[1]) * 60 + Number(m[2]), ml: await this.plannedMl(base, p) });
       }
     }
     const fmt = (s) => `pump ${s.pump} doses ${s.ml} ml at ${String(Math.floor(s.minute / 60)).padStart(2, "0")}:${String(s.minute % 60).padStart(2, "0")}`;
     const cp = plan.confirmPlan;
     if (cp == null ? void 0 : cp.on) {
       const [h, mi] = cp.time.split(":").map(Number);
-      const hit = (0, import_commands.planConflict)({ pump: cp.pump, minute: h * 60 + mi, ml: cp.ml }, slots);
+      const ml = mlOfPlan(plan.states[`pump${cp.pump}.plan`]);
+      const hit = (0, import_commands.planConflict)({ pump: cp.pump, minute: h * 60 + mi, ml }, slots);
       if (hit) {
         throw new import_commands.CommandError(`would dose at the same time: ${fmt(hit)} - choose another time`);
       }
@@ -922,14 +931,25 @@ class Chihiros extends utils.Adapter {
     }
   }
   /**
-   * Confirms a daily dose plan by reading the status image of the pump back (time, amount, on/off).
+   * Daily amount of a pump as last set by this adapter (the pump does not report it).
+   *
+   * @param base Base of the dosing pump states
+   * @param pump Pump 1-4
+   * @returns ml, or UNKNOWN_PLAN_ML when the plan was made in the app
+   */
+  async plannedMl(base, pump) {
+    var _a;
+    return mlOfPlan((_a = await this.getStateAsync(`${base}.pump${pump}.plan`)) == null ? void 0 : _a.val);
+  }
+  /**
+   * Confirms a daily dose plan by reading the status image of the pump back (on/off and time; the pump
+   * does not report the amount and the weekdays).
    *
    * @param rt Runtime data of the dosing pump
    * @param c Expected plan
    * @param c.pump Pump 1-4
    * @param c.on Plan on
    * @param c.time Time HH:MM
-   * @param c.ml Daily amount
    * @param seq Command number (a newer command stops this check)
    */
   async confirmPlan(rt, c, seq) {
@@ -941,16 +961,15 @@ class Chihiros extends utils.Adapter {
     const values = await this.withGatt(() => this.readDevice(rt));
     const on = values == null ? void 0 : values[`pump${c.pump}.planOn`];
     const time = values == null ? void 0 : values[`pump${c.pump}.planTime`];
-    const ml = values == null ? void 0 : values[`pump${c.pump}.planMl`];
     let text;
     let warn = false;
     if (!values || on === void 0) {
       text = "sent, not confirmed (pump not read)";
       warn = true;
-    } else if (on === c.on && (!c.on || time === c.time && ml === c.ml)) {
-      text = c.on ? `confirmed: pump ${c.pump} daily ${c.ml} ml at ${c.time}` : `confirmed: pump ${c.pump} daily dose off`;
+    } else if (on === c.on && (!c.on || time === c.time)) {
+      text = c.on ? `confirmed: pump ${c.pump} doses daily at ${c.time} (amount and weekdays are not reported by the pump)` : `confirmed: pump ${c.pump} daily dose off`;
     } else {
-      text = `not confirmed: pump ${c.pump} reports ${on ? `${String(ml)} ml at ${String(time)}` : "off"} - please check in the app`;
+      text = `not confirmed: pump ${c.pump} reports ${on ? `a dose at ${String(time)}` : "off"} - please check in the app`;
       warn = true;
     }
     if (seq === rt.commandSeq) {

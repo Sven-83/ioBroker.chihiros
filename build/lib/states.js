@@ -77,10 +77,6 @@ function readStates(type) {
             def: ""
           }
         });
-        out.push({
-          id: `pump${p}.planMl`,
-          common: num(`Pump ${p}: daily dose (read from the pump)`, "value", "ml")
-        });
       }
       return out;
     }
@@ -127,7 +123,6 @@ function resultToStates(result, now) {
     result.doserPlan.forEach((p, i) => {
       out[`pump${i + 1}.planOn`] = p.on;
       out[`pump${i + 1}.planTime`] = p.on ? (0, import_protocol.formatMinute)(p.minute) : "";
-      out[`pump${i + 1}.planMl`] = p.on ? p.ml : 0;
     });
   }
   if (result.live) {

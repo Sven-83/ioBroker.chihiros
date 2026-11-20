@@ -208,7 +208,13 @@ describe('commands', () => {
             [0xa5, 0x1b, [1, 0x7f, 1, 1, 0, 50]],
             [0xa5, 0x15, [1, 0, 14, 3, 0, 0]],
         ]);
-        expect(p.confirmPlan).to.deep.equal({ pump: 2, on: true, time: '14:03', ml: 5 });
+        expect(p.confirmPlan).to.deep.equal({ pump: 2, on: true, time: '14:03' });
+        // Mo-Fr and 5.5 ml as sent by the app (second capture 20.11.2026)
+        expect(doserCommand('pump2.plan', '{"on":true,"time":"14:03","ml":5.5,"days":124}').frames[1]).to.deep.equal([
+            0xa5,
+            0x1b,
+            [1, 0x7c, 1, 1, 0, 0x37],
+        ]);
         expect(p.states).to.deep.equal({ 'pump2.plan': '{"on":true,"time":"14:03","ml":5,"days":127}' });
         expect(planCommand(4, 'pump4.plan', '{"on":true,"time":"8:00","ml":25.6}').frames[1]).to.deep.equal([
             0xa5,

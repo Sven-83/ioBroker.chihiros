@@ -3,7 +3,7 @@ import { readChannels, readStates, resultToStates } from './states';
 
 describe('states', () => {
     it('defines read states per type', () => {
-        expect(readStates('doser')).to.have.length(20);
+        expect(readStates('doser')).to.have.length(16);
         expect(readStates('doser')[0].id).to.equal('pump1.total');
         expect(readStates('fan').map(s => s.id)).to.deep.equal(['waterTemp', 'roomTemp', 'humidity']);
         expect(readStates('doctor').map(s => s.id)).to.deep.equal(['waterTemp']);

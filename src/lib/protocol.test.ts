@@ -148,18 +148,14 @@ describe('protocol', () => {
         });
     });
 
-    it('decodes the daily dose plan of the dosing pump (status image 0xfe)', () => {
+    it('decodes on/off and time of the daily dose per pump (status image 0xfe; the amount is not in it)', () => {
         expect(decodeDoserPlan(decodeAnswer(DOSER_IMAGE)!)).to.deep.equal([
-            { on: false, minute: 0, ml: 0 },
-            { on: true, minute: 14 * 60 + 2, ml: 5 },
-            { on: true, minute: 14 * 60, ml: 10 },
-            { on: false, minute: 0, ml: 0 },
+            { on: false, minute: 0 },
+            { on: true, minute: 14 * 60 + 2 },
+            { on: true, minute: 14 * 60 },
+            { on: false, minute: 0 },
         ]);
-        expect(decodeDoserPlan(decodeAnswer(DOSER_IMAGE_AFTER)!)![1]).to.deep.equal({
-            on: true,
-            minute: 14 * 60 + 3,
-            ml: 5,
-        });
+        expect(decodeDoserPlan(decodeAnswer(DOSER_IMAGE_AFTER)!)![1]).to.deep.equal({ on: true, minute: 14 * 60 + 3 });
         expect(decodeDoserPlan(decodeAnswer(DOSER_TOTAL)!)).to.equal(null);
     });
 });
