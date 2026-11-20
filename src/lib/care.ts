@@ -184,6 +184,112 @@ export function tempAlarm(temp: unknown, min: number, max: number): '' | 'low' |
     return temp > max ? 'high' : '';
 }
 
+/** Water temperature history: one point per HISTORY_STEP_MS, kept for HISTORY_KEEP_MS */
+export const HISTORY_STEP_MS = 5 * 60_000;
+export const HISTORY_KEEP_MS = 24 * 3600_000;
+
+/**
+ * Adds a water temperature to the history JSON [[ts, temp], ...] (at most one point per step, last 24 h).
+ *
+ * @param raw Current JSON
+ * @param ts Time stamp
+ * @param temp Water temperature
+ */
+export function addHistory(raw: unknown, ts: number, temp: number): string {
+    let list: Array<[number, number]> = [];
+    try {
+        const v = typeof raw === 'string' && raw ? (JSON.parse(raw) as unknown) : [];
+        if (Array.isArray(v)) {
+            list = v.filter(
+                (p): p is [number, number] => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number',
+            );
+        }
+    } catch {
+        list = [];
+    }
+    const last = list[list.length - 1];
+    if (last && ts - last[0] < HISTORY_STEP_MS) {
+        list[list.length - 1] = [last[0], temp];
+    } else {
+        list.push([ts, temp]);
+    }
+    return JSON.stringify(list.filter(p => p[0] >= ts - HISTORY_KEEP_MS));
+}
+
+/** Fan curve points [water temperature, level] (Sven 20.11.2026, default 26->5, 27->11, 28->20) */
+export type Curve = Array<[number, number]>;
+export const CURVE_DEFAULT: Curve = [
+    [26, 5],
+    [27, 11],
+    [28, 20],
+];
+
+/**
+ * Fan curve from JSON: 1-6 points, sorted, temperatures 15-35, levels 1-20; null when invalid.
+ *
+ * @param raw JSON
+ */
+export function parseCurve(raw: unknown): Curve | null {
+    try {
+        const v = typeof raw === 'string' && raw ? (JSON.parse(raw) as unknown) : null;
+        if (!Array.isArray(v) || !v.length || v.length > 6) {
+            return null;
+        }
+        const c = v.map((p): [number, number] =>
+            Array.isArray(p) ? [Number(p[0]), Math.round(Number(p[1]))] : [NaN, NaN],
+        );
+        if (c.some(([t, l]) => !Number.isFinite(t) || t < 15 || t > 35 || !(l >= 1 && l <= 20))) {
+            return null;
+        }
+        return c.sort((a, b) => a[0] - b[0]);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Fan level of the curve: 0 below the first point, linear between points, last level above.
+ *
+ * @param t Water temperature
+ * @param c Curve
+ */
+export function curveLevel(t: number, c: Curve): number {
+    if (t < c[0][0]) {
+        return 0;
+    }
+    for (let i = 1; i < c.length; i++) {
+        if (t < c[i][0]) {
+            const [t0, l0] = c[i - 1];
+            const [t1, l1] = c[i];
+            return Math.round(l0 + ((l1 - l0) * (t - t0)) / (t1 - t0));
+        }
+    }
+    return c[c.length - 1][1];
+}
+
+/**
+ * Level the automatic wants now: on from the first point, then by the curve; off again only at offTemp
+ * (between offTemp and the first point the lowest level keeps running).
+ *
+ * @param temp Water temperature
+ * @param c Curve
+ * @param offTemp Off at or below this temperature
+ * @param running The automatic runs the fan now
+ */
+export function curveTarget(temp: number, c: Curve, offTemp: number, running: boolean): number {
+    const off = Math.min(offTemp, c[0][0] - 0.1);
+    if (!running) {
+        return temp >= c[0][0] ? curveLevel(temp, c) : 0;
+    }
+    if (temp <= off) {
+        return 0;
+    }
+    return Math.max(c[0][1], curveLevel(temp, c));
+}
+
+/** Pause of the automatic after a level set by hand (Sven 20.11.2026) */
+export const HAND_PAUSE_MS = 3 * 3600_000;
+
 /** Settings of the automatic fan */
 export interface FanAuto {
     /** Automatic switched on */
@@ -351,6 +457,12 @@ export const AQUARIUM_STATES: { settings: StateDef[]; values: StateDef[] } = {
             id: 'fertiliserLow',
             common: value('Fertiliser: bottles almost empty (text, empty = ok)', 'string', 'text', { def: '' }),
         },
+        {
+            id: 'waterTempHistory',
+            common: value('Water temperature of the last 24 h as JSON [[ts, °C], ...]', 'string', 'json', {
+                def: '[]',
+            }),
+        },
     ],
 };
 
@@ -375,13 +487,33 @@ export const FAN_AUTO_STATES: { settings: StateDef[]; values: StateDef[] } = {
         },
         {
             id: 'autoLevel',
-            common: setting('Automatic: level', 'number', 'level', 11, { min: 1, max: 20 }),
+            common: setting('Automatic: level (one-point curve, kept for older views)', 'number', 'level', 11, {
+                min: 1,
+                max: 20,
+            }),
+        },
+        {
+            id: 'curve',
+            common: setting(
+                'Automatic: curve as JSON [[water °C, level], ...], 1-6 points',
+                'string',
+                'json',
+                JSON.stringify(CURVE_DEFAULT),
+            ),
+        },
+        {
+            id: 'installed',
+            common: setting('Fan installed (summer); off = no automatic, no commands', 'boolean', 'switch', false),
         },
     ],
     values: [
         {
             id: 'autoActive',
             common: value('Automatic switched the fan on', 'boolean', 'indicator', { def: false }),
+        },
+        {
+            id: 'autoResumeAt',
+            common: value('Automatic paused by hand until (0 = not paused)', 'number', 'date', { def: 0 }),
         },
     ],
 };
@@ -406,6 +538,13 @@ export function validateSetting(def: StateDef, val: ioBroker.StateValue): ioBrok
     }
     if (c.type === 'boolean') {
         return val === true || val === 'true' || val === 1;
+    }
+    if (def.id === 'curve') {
+        const c = parseCurve(val);
+        if (!c) {
+            throw new Error(`curve: ${JSON.stringify(val)} is not a valid curve`);
+        }
+        return JSON.stringify(c);
     }
     return String(val ?? '').slice(0, 100);
 }

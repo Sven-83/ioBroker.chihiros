@@ -291,7 +291,6 @@ class Chihiros extends utils.Adapter {
         values,
         commandSeq: 0,
         autoActive: d.type === "fan" && (autoActive == null ? void 0 : autoActive.val) === true,
-        autoHold: false,
         autoTriedAt: 0
       });
       const indicator = (0, import_power.powerIndicator)(d.type);
@@ -381,7 +380,19 @@ class Chihiros extends utils.Adapter {
       this.settingVals.set(id, v);
       await this.setState(id, v, true);
       this.log.info(`setting ${id} = ${JSON.stringify(v)}`);
-      if (id.startsWith("aquarium.temp") || /\.(auto|autoOnTemp|autoOffTemp|autoLevel)$/.test(id)) {
+      if (/\.auto$/.test(id) && v === true) {
+        await this.setState(id.replace(/\.auto$/, ".autoResumeAt"), 0, true);
+      }
+      if (/\.autoOnTemp$|\.autoLevel$/.test(id)) {
+        const fanBase = id.replace(/\.(autoOnTemp|autoLevel)$/, "");
+        const one = [
+          this.settingNum(`${fanBase}.autoOnTemp`, 26),
+          this.settingNum(`${fanBase}.autoLevel`, 11)
+        ];
+        this.settingVals.set(`${fanBase}.curve`, JSON.stringify([one]));
+        await this.setState(`${fanBase}.curve`, JSON.stringify([one]), true);
+      }
+      if (id.startsWith("aquarium.temp") || /\.(auto|autoOnTemp|autoOffTemp|autoLevel|curve|installed)$/.test(id)) {
         if (this.lastWaterTemp !== void 0) {
           await this.onWaterTemp(this.lastWaterTemp);
         }
@@ -494,8 +505,11 @@ class Chihiros extends utils.Adapter {
    * @param temp Water temperature
    */
   async onWaterTemp(temp) {
+    var _a;
     this.lastWaterTemp = temp;
     await this.setState("aquarium.waterTemp", temp, true);
+    const hist = (_a = await this.getStateAsync("aquarium.waterTempHistory")) == null ? void 0 : _a.val;
+    await this.setState("aquarium.waterTempHistory", (0, import_care.addHistory)(hist, Date.now(), temp), true);
     const min = this.settingNum("aquarium.tempMin", 20);
     const max = this.settingNum("aquarium.tempMax", 28);
     const alarm = (0, import_care.tempAlarm)(temp, min, max);
@@ -512,27 +526,42 @@ class Chihiros extends utils.Adapter {
     if (!fan) {
       return;
     }
+    await this.fanAutomatic(fan, temp);
+  }
+  /**
+   * Automatic fan by the curve (Sven 20.11.2026): only when installed and switched on; a level set by hand
+   * pauses the automatic for 3 h (autoResumeAt), then it switches itself on again.
+   *
+   * @param fan Runtime data of the fan
+   * @param temp Water temperature
+   */
+  async fanAutomatic(fan, temp) {
+    var _a, _b;
     const base = `devices.${fan.device.id}`;
-    const cfg = {
-      enabled: this.settingVals.get(`${base}.auto`) === true,
-      onTemp: this.settingNum(`${base}.autoOnTemp`, 26),
-      offTemp: this.settingNum(`${base}.autoOffTemp`, 25.5),
-      level: this.settingNum(`${base}.autoLevel`, 11)
-    };
-    if (fan.autoHold && temp <= Math.min(cfg.offTemp, cfg.onTemp - 0.1)) {
-      fan.autoHold = false;
-      this.log.info(`${fan.device.name}: water cool again - the automatic takes over again`);
+    if (this.settingVals.get(`${base}.installed`) !== true) {
+      return;
     }
-    const action = (0, import_care.fanAutoAction)(temp, cfg, fan.autoActive, fan.autoHold);
-    if (!action || Date.now() - fan.autoTriedAt < FAN_AUTO_RETRY_MS) {
+    const resume = (_a = await this.getStateAsync(`${base}.autoResumeAt`)) == null ? void 0 : _a.val;
+    if (typeof resume === "number" && resume > 0 && Date.now() >= resume) {
+      await this.setState(`${base}.autoResumeAt`, 0, true);
+      this.settingVals.set(`${base}.auto`, true);
+      await this.setState(`${base}.auto`, true, true);
+      this.log.info(`${fan.device.name}: 3 h after the hand setting - the automatic takes over again`);
+    }
+    if (this.settingVals.get(`${base}.auto`) !== true) {
+      return;
+    }
+    const curve = (_b = (0, import_care.parseCurve)(this.settingVals.get(`${base}.curve`))) != null ? _b : import_care.CURVE_DEFAULT;
+    const off = this.settingNum(`${base}.autoOffTemp`, curve[0][0] - 0.5);
+    const current = typeof fan.values.level === "number" ? fan.values.level : 0;
+    const target = (0, import_care.curveTarget)(temp, curve, off, fan.autoActive && current > 0);
+    if (target === current || Date.now() - fan.autoTriedAt < FAN_AUTO_RETRY_MS) {
       return;
     }
     fan.autoTriedAt = Date.now();
-    this.log.info(
-      `${fan.device.name}: automatic - water ${temp} \xB0C, switching ${action === "on" ? `on (level ${cfg.level})` : "off"}`
-    );
-    if (await this.runCommand(fan, "level", action === "on" ? cfg.level : 0, "auto")) {
-      fan.autoActive = action === "on";
+    this.log.info(`${fan.device.name}: automatic - water ${temp} \xB0C, level ${current} -> ${target}`);
+    if (await this.runCommand(fan, "level", target, "auto")) {
+      fan.autoActive = target > 0;
       fan.autoTriedAt = 0;
       await this.setState(`${base}.autoActive`, fan.autoActive, true);
     }
@@ -825,11 +854,13 @@ class Chihiros extends utils.Adapter {
     const base = `devices.${d.id}`;
     const seq = ++rt.commandSeq;
     let plan;
-    if (d.type === "fan" && source === "user" && rt.autoActive) {
+    if (d.type === "fan" && source === "user" && this.settingVals.get(`${base}.auto`) === true) {
       rt.autoActive = false;
-      rt.autoHold = true;
+      this.settingVals.set(`${base}.auto`, false);
+      await this.setState(`${base}.auto`, false, true);
       await this.setState(`${base}.autoActive`, false, true);
-      this.log.info(`${d.name}: set by hand - the automatic waits until the water is cool again`);
+      await this.setState(`${base}.autoResumeAt`, Date.now() + import_care.HAND_PAUSE_MS, true);
+      this.log.info(`${d.name}: set by hand - the automatic pauses for 3 h`);
     }
     try {
       plan = this.buildPlan(rt, stateId, value);
@@ -864,7 +895,8 @@ class Chihiros extends utils.Adapter {
         void this.confirmPlan(rt, plan.confirmPlan, seq);
       } else if (d.type === "co2" && d.powerState && typeof plan.states.on === "boolean") {
         await this.setState(`${base}.commandResult`, "sent, checking the power", true);
-        void this.confirmCo2(rt, plan.states.on, seq);
+        const open = plan.states.on && typeof plan.states.schedule === "string" ? (0, import_commands.co2ShouldBeOpen)(plan.states.schedule, /* @__PURE__ */ new Date()) : plan.states.on;
+        void this.confirmCo2(rt, open, seq);
       } else if (d.type === "fan" && d.powerState && typeof plan.states.level === "number") {
         await this.setState(`${base}.commandResult`, "sent, checking the power", true);
         void this.confirmFan(rt, plan.states.level, seq);

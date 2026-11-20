@@ -1,5 +1,11 @@
 import { expect } from 'chai';
 import {
+    addHistory,
+    CURVE_DEFAULT,
+    curveLevel,
+    curveTarget,
+    HISTORY_STEP_MS,
+    parseCurve,
     AQUARIUM_STATES,
     dailyDose,
     dayKey,
@@ -171,5 +177,44 @@ describe('care', () => {
             expect(validateSetting(def('auto'), 0)).to.equal(false);
             expect(validateSetting(def('pump1.label'), 'Eisen')).to.equal('Eisen');
         });
+    });
+
+    it('keeps the water temperature of the last 24 h, one point per 5 min', () => {
+        const t0 = new Date(2026, 10, 20, 12).getTime();
+        let h = addHistory('', t0, 21);
+        h = addHistory(h, t0 + 60_000, 21.1);
+        expect(JSON.parse(h)).to.deep.equal([[t0, 21.1]]);
+        h = addHistory(h, t0 + HISTORY_STEP_MS, 21.2);
+        expect(JSON.parse(h)).to.have.length(2);
+        h = addHistory(h, t0 + 25 * 3600_000, 22);
+        expect(JSON.parse(h)).to.deep.equal([[t0 + 25 * 3600_000, 22]]);
+        expect(JSON.parse(addHistory('kaputt', t0, 20))).to.deep.equal([[t0, 20]]);
+    });
+
+    it('fan curve (Sven 20.11.2026): on from the first point, linear, off only at the off temperature', () => {
+        expect(parseCurve('[[27,11],[26,5]]')).to.deep.equal([
+            [26, 5],
+            [27, 11],
+        ]);
+        for (const bad of [
+            '',
+            'x',
+            '[]',
+            '[[26,0]]',
+            '[[40,5]]',
+            '[[26,21]]',
+            JSON.stringify(Array(7).fill([26, 5])),
+        ]) {
+            expect(parseCurve(bad), bad).to.equal(null);
+        }
+        expect(curveLevel(25.9, CURVE_DEFAULT)).to.equal(0);
+        expect(curveLevel(26.5, CURVE_DEFAULT)).to.equal(8);
+        expect(curveLevel(30, CURVE_DEFAULT)).to.equal(20);
+        expect(curveTarget(25.9, CURVE_DEFAULT, 25.5, false)).to.equal(0);
+        expect(curveTarget(26, CURVE_DEFAULT, 25.5, false)).to.equal(5);
+        // running: stays at the lowest level until the water is cool again
+        expect(curveTarget(25.7, CURVE_DEFAULT, 25.5, true)).to.equal(5);
+        expect(curveTarget(25.5, CURVE_DEFAULT, 25.5, true)).to.equal(0);
+        expect(curveTarget(27.5, CURVE_DEFAULT, 25.5, true)).to.equal(16);
     });
 });

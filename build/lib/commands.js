@@ -25,6 +25,7 @@ __export(commands_exports, {
   DOSE_GAP_MIN: () => DOSE_GAP_MIN,
   DOSE_SECONDS_PER_ML: () => DOSE_SECONDS_PER_ML,
   LIGHT_CHANNELS: () => LIGHT_CHANNELS,
+  MAX_CO2_WINDOWS: () => MAX_CO2_WINDOWS,
   MAX_DOSE_ML: () => MAX_DOSE_ML,
   MAX_FAN_LEVEL: () => MAX_FAN_LEVEL,
   MAX_PLAN_ML: () => MAX_PLAN_ML,
@@ -43,11 +44,14 @@ __export(commands_exports, {
   clockFrame: () => clockFrame,
   clockParams: () => clockParams,
   co2Command: () => co2Command,
+  co2ScheduleCommand: () => co2ScheduleCommand,
+  co2ShouldBeOpen: () => co2ShouldBeOpen,
   doctorCommand: () => doctorCommand,
   doseMinutes: () => doseMinutes,
   doserCommand: () => doserCommand,
   fanCommand: () => fanCommand,
   lightCommand: () => lightCommand,
+  parseCo2Windows: () => parseCo2Windows,
   planCommand: () => planCommand,
   planConflict: () => planConflict,
   writeStates: () => writeStates
@@ -162,6 +166,17 @@ function writeStates(type) {
       );
     case "co2":
       return [
+        {
+          id: "schedule",
+          common: {
+            name: 'CO2 time windows "HH:MM-HH:MM, ..." (empty or 00:00-23:59 = always); overwrites the schedule of the app',
+            type: "string",
+            role: "text",
+            read: true,
+            write: true,
+            def: ""
+          }
+        },
         {
           id: "on",
           common: {
@@ -365,6 +380,9 @@ function fanCommand(id, value) {
   };
 }
 function co2Command(id, value) {
+  if (id === "schedule") {
+    return co2ScheduleCommand(value);
+  }
   if (id !== "on") {
     throw new CommandError(`${id} is not writable`);
   }
@@ -383,8 +401,58 @@ function co2Command(id, value) {
       [import_protocol.CMD_5A, MODE_CO2_SCHEDULE, on ? [0, 0, 100] : [0, 0, 111]],
       [import_protocol.CMD_5A, MODE_CO2_SCHEDULE, on ? [23, 59, 0] : [23, 59, 111]]
     ],
-    states: { on }
+    states: on ? { on, schedule: "" } : { on }
   };
+}
+const MAX_CO2_WINDOWS = 4;
+function parseCo2Windows(text) {
+  const out = [];
+  for (const part of text.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const m = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(part);
+    const a = m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+    const e = m ? Number(m[3]) * 60 + Number(m[4]) : NaN;
+    if (!m || Number(m[2]) > 59 || Number(m[4]) > 59 || !(a >= 0 && a < e && e <= 1439)) {
+      throw new CommandError(
+        `invalid window ${JSON.stringify(part)} (HH:MM-HH:MM, end after start, at most 23:59)`
+      );
+    }
+    out.push([a, e]);
+  }
+  out.sort((x, y) => x[0] - y[0]);
+  for (let i = 1; i < out.length; i++) {
+    if (out[i][0] <= out[i - 1][1]) {
+      throw new CommandError("windows overlap");
+    }
+  }
+  if (out.length > MAX_CO2_WINDOWS) {
+    throw new CommandError(`at most ${MAX_CO2_WINDOWS} windows`);
+  }
+  return out;
+}
+function co2ScheduleCommand(value) {
+  const text = typeof value === "string" ? value : "";
+  const win = parseCo2Windows(text);
+  const all = !win.length || win.length === 1 && win[0][0] === 0 && win[0][1] === 1439;
+  const list = all ? [[0, 1439]] : win;
+  const hm = (m) => [Math.floor(m / 60), m % 60];
+  const fmt = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const norm = all ? "" : list.map(([a, e]) => `${fmt(a)}-${fmt(e)}`).join(", ");
+  return {
+    label: `CO2 schedule ${all ? "00:00-23:59 (always)" : norm}`,
+    frames: [
+      [import_protocol.CMD_5A, MODE_SETTING, [7, 255, 255]],
+      ...list.flatMap(([a, e]) => [
+        [import_protocol.CMD_5A, MODE_CO2_SCHEDULE, [...hm(a), 100]],
+        [import_protocol.CMD_5A, MODE_CO2_SCHEDULE, [...hm(e), 0]]
+      ])
+    ],
+    states: { schedule: norm, on: true }
+  };
+}
+function co2ShouldBeOpen(schedule, now) {
+  const win = schedule ? parseCo2Windows(schedule) : [];
+  const m = now.getHours() * 60 + now.getMinutes();
+  return !win.length || win.some(([a, e]) => m >= a && m < e);
 }
 function doctorCommand(id, value) {
   if (id !== "mode") {
@@ -413,6 +481,7 @@ function doctorCommand(id, value) {
   DOSE_GAP_MIN,
   DOSE_SECONDS_PER_ML,
   LIGHT_CHANNELS,
+  MAX_CO2_WINDOWS,
   MAX_DOSE_ML,
   MAX_FAN_LEVEL,
   MAX_PLAN_ML,
@@ -431,11 +500,14 @@ function doctorCommand(id, value) {
   clockFrame,
   clockParams,
   co2Command,
+  co2ScheduleCommand,
+  co2ShouldBeOpen,
   doctorCommand,
   doseMinutes,
   doserCommand,
   fanCommand,
   lightCommand,
+  parseCo2Windows,
   planCommand,
   planConflict,
   writeStates

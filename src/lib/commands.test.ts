@@ -1,5 +1,7 @@
 import { expect } from 'chai';
 import {
+    co2ShouldBeOpen,
+    parseCo2Windows,
     clockFrame,
     clockParams,
     co2Command,
@@ -32,7 +34,7 @@ describe('commands', () => {
         ]);
         expect(writeStates('doser')[4].common.max).to.equal(5);
         expect(writeStates('fan').map(s => s.id)).to.deep.equal(['level']);
-        expect(writeStates('co2').map(s => s.id)).to.deep.equal(['on']);
+        expect(writeStates('co2').map(s => s.id)).to.deep.equal(['schedule', 'on']);
         expect(writeStates('doctor').map(s => s.id)).to.deep.equal(['mode']);
         expect(writeStates('doctor')[0].common.states).to.deep.equal({ fish: 'Fish', shrimp: 'Shrimp' });
     });
@@ -158,7 +160,7 @@ describe('commands', () => {
                 [0x5a, 22, [0, 0, 100]],
                 [0x5a, 22, [23, 59, 0]],
             ],
-            states: { on: true },
+            states: { on: true, schedule: '' },
         });
         // off: [90,22,[0,0,111]], [90,22,[23,59,111]]
         expect(co2Command('on', 'false').frames).to.deep.equal([
@@ -248,5 +250,31 @@ describe('commands', () => {
         expect(planConflict({ pump: 3, minute: 840, ml: 10 }, [p3])).to.equal(null);
         // across midnight
         expect(planConflict({ pump: 1, minute: 0, ml: 1 }, [{ pump: 2, minute: 1439, ml: 5 }])).to.not.equal(null);
+    });
+
+    it('CO2 time windows: one open and one close slot per window', () => {
+        expect(co2Command('schedule', '10:00-12:00, 13:00-20:00').frames).to.deep.equal([
+            [0x5a, 0x05, [0x07, 0xff, 0xff]],
+            [0x5a, 0x16, [10, 0, 0x64]],
+            [0x5a, 0x16, [12, 0, 0x00]],
+            [0x5a, 0x16, [13, 0, 0x64]],
+            [0x5a, 0x16, [20, 0, 0x00]],
+        ]);
+        // always = the frames of the app
+        expect(co2Command('schedule', '').frames).to.deep.equal(co2Command('on', true).frames);
+        expect(co2Command('schedule', '00:00-23:59').states).to.deep.equal({ schedule: '', on: true });
+        expect(co2Command('schedule', '13:00-20:00,9:30-10:00').states.schedule).to.equal('09:30-10:00, 13:00-20:00');
+        for (const bad of [
+            'x',
+            '12:00-11:00',
+            '10:00-12:00, 11:00-13:00',
+            '10:00-24:00',
+            '1:00-2:00,3:00-4:00,5:00-6:00,7:00-8:00,9:00-10:00',
+        ]) {
+            expect(() => parseCo2Windows(bad), bad).to.throw(CommandError);
+        }
+        expect(co2ShouldBeOpen('', new Date(2026, 10, 20, 23))).to.equal(true);
+        expect(co2ShouldBeOpen('10:00-12:00', new Date(2026, 10, 20, 11, 59))).to.equal(true);
+        expect(co2ShouldBeOpen('10:00-12:00', new Date(2026, 10, 20, 12, 0))).to.equal(false);
     });
 });

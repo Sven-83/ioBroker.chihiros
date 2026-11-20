@@ -19,9 +19,16 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var care_exports = {};
 __export(care_exports, {
   AQUARIUM_STATES: () => AQUARIUM_STATES,
+  CURVE_DEFAULT: () => CURVE_DEFAULT,
   DEFAULT_REFILL_ML: () => DEFAULT_REFILL_ML,
   FAN_AUTO_STATES: () => FAN_AUTO_STATES,
+  HAND_PAUSE_MS: () => HAND_PAUSE_MS,
   HISTORY_DAYS: () => HISTORY_DAYS,
+  HISTORY_KEEP_MS: () => HISTORY_KEEP_MS,
+  HISTORY_STEP_MS: () => HISTORY_STEP_MS,
+  addHistory: () => addHistory,
+  curveLevel: () => curveLevel,
+  curveTarget: () => curveTarget,
   dailyDose: () => dailyDose,
   dayKey: () => dayKey,
   daysLeft: () => daysLeft,
@@ -29,6 +36,7 @@ __export(care_exports, {
   emptyStock: () => emptyStock,
   fanAutoAction: () => fanAutoAction,
   isLow: () => isLow,
+  parseCurve: () => parseCurve,
   parseStock: () => parseStock,
   pumpCareStates: () => pumpCareStates,
   refill: () => refill,
@@ -127,6 +135,74 @@ function tempAlarm(temp, min, max) {
   }
   return temp > max ? "high" : "";
 }
+const HISTORY_STEP_MS = 5 * 6e4;
+const HISTORY_KEEP_MS = 24 * 36e5;
+function addHistory(raw, ts, temp) {
+  let list = [];
+  try {
+    const v = typeof raw === "string" && raw ? JSON.parse(raw) : [];
+    if (Array.isArray(v)) {
+      list = v.filter(
+        (p) => Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number"
+      );
+    }
+  } catch {
+    list = [];
+  }
+  const last = list[list.length - 1];
+  if (last && ts - last[0] < HISTORY_STEP_MS) {
+    list[list.length - 1] = [last[0], temp];
+  } else {
+    list.push([ts, temp]);
+  }
+  return JSON.stringify(list.filter((p) => p[0] >= ts - HISTORY_KEEP_MS));
+}
+const CURVE_DEFAULT = [
+  [26, 5],
+  [27, 11],
+  [28, 20]
+];
+function parseCurve(raw) {
+  try {
+    const v = typeof raw === "string" && raw ? JSON.parse(raw) : null;
+    if (!Array.isArray(v) || !v.length || v.length > 6) {
+      return null;
+    }
+    const c = v.map(
+      (p) => Array.isArray(p) ? [Number(p[0]), Math.round(Number(p[1]))] : [NaN, NaN]
+    );
+    if (c.some(([t, l]) => !Number.isFinite(t) || t < 15 || t > 35 || !(l >= 1 && l <= 20))) {
+      return null;
+    }
+    return c.sort((a, b) => a[0] - b[0]);
+  } catch {
+    return null;
+  }
+}
+function curveLevel(t, c) {
+  if (t < c[0][0]) {
+    return 0;
+  }
+  for (let i = 1; i < c.length; i++) {
+    if (t < c[i][0]) {
+      const [t0, l0] = c[i - 1];
+      const [t1, l1] = c[i];
+      return Math.round(l0 + (l1 - l0) * (t - t0) / (t1 - t0));
+    }
+  }
+  return c[c.length - 1][1];
+}
+function curveTarget(temp, c, offTemp, running) {
+  const off = Math.min(offTemp, c[0][0] - 0.1);
+  if (!running) {
+    return temp >= c[0][0] ? curveLevel(temp, c) : 0;
+  }
+  if (temp <= off) {
+    return 0;
+  }
+  return Math.max(c[0][1], curveLevel(temp, c));
+}
+const HAND_PAUSE_MS = 3 * 36e5;
 function fanAutoAction(temp, cfg, active, hold) {
   if (!cfg.enabled) {
     return active ? "off" : null;
@@ -247,6 +323,12 @@ const AQUARIUM_STATES = {
     {
       id: "fertiliserLow",
       common: value("Fertiliser: bottles almost empty (text, empty = ok)", "string", "text", { def: "" })
+    },
+    {
+      id: "waterTempHistory",
+      common: value("Water temperature of the last 24 h as JSON [[ts, \xB0C], ...]", "string", "json", {
+        def: "[]"
+      })
     }
   ]
 };
@@ -270,13 +352,33 @@ const FAN_AUTO_STATES = {
     },
     {
       id: "autoLevel",
-      common: setting("Automatic: level", "number", "level", 11, { min: 1, max: 20 })
+      common: setting("Automatic: level (one-point curve, kept for older views)", "number", "level", 11, {
+        min: 1,
+        max: 20
+      })
+    },
+    {
+      id: "curve",
+      common: setting(
+        "Automatic: curve as JSON [[water \xB0C, level], ...], 1-6 points",
+        "string",
+        "json",
+        JSON.stringify(CURVE_DEFAULT)
+      )
+    },
+    {
+      id: "installed",
+      common: setting("Fan installed (summer); off = no automatic, no commands", "boolean", "switch", false)
     }
   ],
   values: [
     {
       id: "autoActive",
       common: value("Automatic switched the fan on", "boolean", "indicator", { def: false })
+    },
+    {
+      id: "autoResumeAt",
+      common: value("Automatic paused by hand until (0 = not paused)", "number", "date", { def: 0 })
     }
   ]
 };
@@ -296,14 +398,28 @@ function validateSetting(def, val) {
   if (c.type === "boolean") {
     return val === true || val === "true" || val === 1;
   }
+  if (def.id === "curve") {
+    const c2 = parseCurve(val);
+    if (!c2) {
+      throw new Error(`curve: ${JSON.stringify(val)} is not a valid curve`);
+    }
+    return JSON.stringify(c2);
+  }
   return String(val != null ? val : "").slice(0, 100);
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   AQUARIUM_STATES,
+  CURVE_DEFAULT,
   DEFAULT_REFILL_ML,
   FAN_AUTO_STATES,
+  HAND_PAUSE_MS,
   HISTORY_DAYS,
+  HISTORY_KEEP_MS,
+  HISTORY_STEP_MS,
+  addHistory,
+  curveLevel,
+  curveTarget,
   dailyDose,
   dayKey,
   daysLeft,
@@ -311,6 +427,7 @@ function validateSetting(def, val) {
   emptyStock,
   fanAutoAction,
   isLow,
+  parseCurve,
   parseStock,
   pumpCareStates,
   refill,

@@ -171,6 +171,17 @@ export function writeStates(type: DeviceType): StateDef[] {
         case 'co2':
             return [
                 {
+                    id: 'schedule',
+                    common: {
+                        name: 'CO2 time windows "HH:MM-HH:MM, ..." (empty or 00:00-23:59 = always); overwrites the schedule of the app',
+                        type: 'string',
+                        role: 'text',
+                        read: true,
+                        write: true,
+                        def: '',
+                    },
+                },
+                {
                     id: 'on',
                     common: {
                         name: 'CO2 on (schedule 00:00-23:59) / off (schedule empty); overwrites the schedule of the app',
@@ -466,6 +477,9 @@ export function fanCommand(id: string, value: ioBroker.StateValue): CommandPlan 
  * @param value Written value
  */
 export function co2Command(id: string, value: ioBroker.StateValue): CommandPlan {
+    if (id === 'schedule') {
+        return co2ScheduleCommand(value);
+    }
     if (id !== 'on') {
         throw new CommandError(`${id} is not writable`);
     }
@@ -484,8 +498,84 @@ export function co2Command(id: string, value: ioBroker.StateValue): CommandPlan 
             [CMD_5A, MODE_CO2_SCHEDULE, on ? [0x00, 0x00, 0x64] : [0x00, 0x00, 0x6f]],
             [CMD_5A, MODE_CO2_SCHEDULE, on ? [0x17, 0x3b, 0x00] : [0x17, 0x3b, 0x6f]],
         ],
-        states: { on },
+        states: on ? { on, schedule: '' } : { on },
     };
+}
+
+/** Most CO2 time windows (Sven 20.11.2026: up to 4; whether the controller keeps more than one: write test) */
+export const MAX_CO2_WINDOWS = 4;
+
+/**
+ * Parses CO2 time windows "HH:MM-HH:MM, ..." into minutes; throws on invalid text or overlapping windows.
+ *
+ * @param text Windows
+ */
+export function parseCo2Windows(text: string): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    for (const part of text
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean)) {
+        const m = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(part);
+        const a = m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+        const e = m ? Number(m[3]) * 60 + Number(m[4]) : NaN;
+        if (!m || Number(m[2]) > 59 || Number(m[4]) > 59 || !(a >= 0 && a < e && e <= 1439)) {
+            throw new CommandError(
+                `invalid window ${JSON.stringify(part)} (HH:MM-HH:MM, end after start, at most 23:59)`,
+            );
+        }
+        out.push([a, e]);
+    }
+    out.sort((x, y) => x[0] - y[0]);
+    for (let i = 1; i < out.length; i++) {
+        if (out[i][0] <= out[i - 1][1]) {
+            throw new CommandError('windows overlap');
+        }
+    }
+    if (out.length > MAX_CO2_WINDOWS) {
+        throw new CommandError(`at most ${MAX_CO2_WINDOWS} windows`);
+    }
+    return out;
+}
+
+/**
+ * CO2 schedule with time windows: per window one slot "open" at the start and one "close" at the end
+ * (5a/16 [hour, minute, 0x64 | 0x00], like the app for 00:00-23:59).
+ *
+ * @param value Windows text
+ */
+export function co2ScheduleCommand(value: ioBroker.StateValue): CommandPlan {
+    const text = typeof value === 'string' ? value : '';
+    const win = parseCo2Windows(text);
+    const all = !win.length || (win.length === 1 && win[0][0] === 0 && win[0][1] === 1439);
+    const list: Array<[number, number]> = all ? [[0, 1439]] : win;
+    const hm = (m: number): [number, number] => [Math.floor(m / 60), m % 60];
+    const fmt = (m: number): string =>
+        `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const norm = all ? '' : list.map(([a, e]) => `${fmt(a)}-${fmt(e)}`).join(', ');
+    return {
+        label: `CO2 schedule ${all ? '00:00-23:59 (always)' : norm}`,
+        frames: [
+            [CMD_5A, MODE_SETTING, [0x07, 0xff, 0xff]],
+            ...list.flatMap(([a, e]): RawFrame[] => [
+                [CMD_5A, MODE_CO2_SCHEDULE, [...hm(a), 0x64]],
+                [CMD_5A, MODE_CO2_SCHEDULE, [...hm(e), 0x00]],
+            ]),
+        ],
+        states: { schedule: norm, on: true },
+    };
+}
+
+/**
+ * Whether the valve should be open now by the windows (empty = always).
+ *
+ * @param schedule Windows text
+ * @param now Local time
+ */
+export function co2ShouldBeOpen(schedule: string, now: Date): boolean {
+    const win = schedule ? parseCo2Windows(schedule) : [];
+    const m = now.getHours() * 60 + now.getMinutes();
+    return !win.length || win.some(([a, e]) => m >= a && m < e);
 }
 
 /**
