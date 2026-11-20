@@ -8,11 +8,14 @@ const ans = (s: string): ReturnType<typeof decodeAnswer> => decodeAnswer(hex(s))
 const INFO = ans('5b 08 0a 00 01 0a 01 ff ff ff 64 13 88 08')!;
 const TOTAL = ans('5b 01 0a 00 01 1e 00 00 0e 12 1c 84 00 00 14')!;
 const TODAY = ans('5b 01 0a 00 01 22 00 00 00 00 00 64 00 00 28')!;
+const IMAGE = ans(
+    '5b 08 30 00 01 fe 05 12 20 04 00 00 00 00 00 00 00 00 00 0e 03 00 00 00 00 00 32 00 0e 00 00 00 00 00 00 64 04 00 00 00 00 00 00 00 00 00 05 0a 00 00',
+)!;
 const FAN = ans('5b 09 0b 00 01 25 17 12 08 92 00 e1 22')!;
 const DOCTOR = ans('5b 04 0c 00 01 25 00 00 0b ff 00 d0 00 22')!;
 
 describe('reader', () => {
-    it('asks the dosing pump for status, totals and today', () => {
+    it('asks the dosing pump for status (incl. the plan image), totals and today', () => {
         const plan = readPlan('doser', new MessageIds());
         expect(plan.frames.map(f => Array.from(f))).to.deep.equal([
             hex('5a 01 06 00 01 04 01 03'),
@@ -20,7 +23,8 @@ describe('reader', () => {
             hex('a5 01 06 00 03 04 05 05'),
         ]);
         expect(plan.isDone([INFO, TOTAL])).to.equal(false);
-        expect(plan.isDone([INFO, TOTAL, TODAY])).to.equal(true);
+        expect(plan.isDone([INFO, TOTAL, TODAY])).to.equal(false);
+        expect(plan.isDone([INFO, IMAGE, TOTAL, TODAY])).to.equal(true);
     });
 
     it('sends only the status query to the other devices', () => {

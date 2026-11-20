@@ -19,6 +19,17 @@ export const MODE_DOSE = 0x1b;
 /** Largest manual dose per command in ml (safety limit, Sven 17.11.2026) */
 export const MAX_DOSE_ML = 5;
 
+/** Mode byte (a5 family): pump channel on/off, params [pump index, 0, 1 = on / 0 = off] (capture 20.11.2026: on) */
+export const MODE_PLAN_ACTIVE = 0x20;
+/** Mode byte (a5 family): daily dose, params [pump index, weekdays, 1, 1, ml x 10 hi, lo] (same byte as the manual dose, 6 params) */
+export const MODE_PLAN_DOSE = 0x1b;
+/** Mode byte (a5 family): dosing time, params [pump index, 0, hour, minute, 0, 0] */
+export const MODE_PLAN_TIME = 0x15;
+/** All weekdays (0x7f); the app sent 0x1f for a plan on five days (bit order still to confirm) */
+export const ALL_DAYS = 0x7f;
+/** Largest daily dose in ml (safety limit) */
+export const MAX_PLAN_ML = 30;
+
 /** Mode byte: setting before a schedule write, CO2 controller sends [07 ff ff] like the app (16.11.2026) */
 export const MODE_SETTING = 0x05;
 /** Mode byte: CO2 schedule slot, params [hour, minute, action]; action 0x64 = open, 0x00 = close, 0x6f = empty */
@@ -61,6 +72,8 @@ export interface CommandPlan {
     states: Record<string, ioBroker.StateValue>;
     /** Dosing pump: confirm the dose by the total counter of this pump (1-4) */
     confirm?: { pump: number; ml: number };
+    /** Dosing pump: confirm a daily dose plan by reading the status image back */
+    confirmPlan?: { pump: number; on: boolean; time: string; ml: number };
 }
 
 /** States every writable device gets */
@@ -124,21 +137,37 @@ export function writeStates(type: DeviceType): StateDef[] {
                 },
             ];
         case 'doser':
-            return Array.from({ length: PUMPS }, (_, i) => ({
-                id: `pump${i + 1}.doseNow`,
-                common: {
-                    name: `Pump ${i + 1}: dose now (ml, 0.1-${MAX_DOSE_ML})`,
-                    type: 'number',
-                    role: 'level',
-                    unit: 'ml',
-                    min: 0,
-                    max: MAX_DOSE_ML,
-                    step: 0.1,
-                    read: true,
-                    write: true,
-                    def: 0,
+            return Array.from({ length: PUMPS }, (_, i): StateDef[] => [
+                {
+                    id: `pump${i + 1}.plan`,
+                    common: {
+                        name: `Pump ${i + 1}: daily dose plan as JSON {"on":true,"time":"14:00","ml":5,"days":127} (days: bit mask, 127 = every day)`,
+                        type: 'string',
+                        role: 'json',
+                        read: true,
+                        write: true,
+                        def: '',
+                    },
                 },
-            }));
+            ])
+                .flat()
+                .concat(
+                    Array.from({ length: PUMPS }, (_, i) => ({
+                        id: `pump${i + 1}.doseNow`,
+                        common: {
+                            name: `Pump ${i + 1}: dose now (ml, 0.1-${MAX_DOSE_ML})`,
+                            type: 'number',
+                            role: 'level',
+                            unit: 'ml',
+                            min: 0,
+                            max: MAX_DOSE_ML,
+                            step: 0.1,
+                            read: true,
+                            write: true,
+                            def: 0,
+                        },
+                    })),
+                );
         case 'co2':
             return [
                 {
@@ -268,6 +297,10 @@ export function lightCommand(
  * @param value Written value in ml
  */
 export function doserCommand(id: string, value: ioBroker.StateValue): CommandPlan {
+    const plan = /^pump([1-4])\.plan$/.exec(id);
+    if (plan) {
+        return planCommand(Number(plan[1]), id, value);
+    }
     const m = /^pump([1-4])\.doseNow$/.exec(id);
     if (!m) {
         throw new CommandError(`${id} is not writable`);
@@ -287,6 +320,113 @@ export function doserCommand(id: string, value: ioBroker.StateValue): CommandPla
         frames: [[CMD_A5, MODE_DOSE, [pump - 1, 0, 0, 0, tenths]]],
         states: { [id]: ml },
         confirm: { pump, ml },
+    };
+}
+
+/**
+ * Dosing must never run on two pumps at the same time (Sven 20.11.2026). A dose is assumed to take
+ * DOSE_SECONDS_PER_ML per ml (conservative), plus a gap before the next pump may start.
+ */
+export const DOSE_SECONDS_PER_ML = 6;
+/** Minutes between the end of one dose and the start of another */
+export const DOSE_GAP_MIN = 1;
+
+/** Daily dose of one pump for the overlap check */
+export interface PlanSlot {
+    /** Pump 1-4 */
+    pump: number;
+    /** Start in minutes after midnight */
+    minute: number;
+    /** Amount in ml */
+    ml: number;
+}
+
+/**
+ * Minutes a dose occupies incl. the gap after it (at least 1 + gap).
+ *
+ * @param ml Amount
+ */
+export function doseMinutes(ml: number): number {
+    return Math.max(1, Math.ceil((ml * DOSE_SECONDS_PER_ML) / 60)) + DOSE_GAP_MIN;
+}
+
+/**
+ * Finds a pump whose daily dose would run at the same time as the new one (also across midnight).
+ *
+ * @param slot New daily dose
+ * @param others Active daily doses of the other pumps
+ */
+export function planConflict(slot: PlanSlot, others: PlanSlot[]): PlanSlot | null {
+    const day = 1440;
+    for (const o of others) {
+        if (o.pump === slot.pump) {
+            continue;
+        }
+        const a0 = slot.minute;
+        const a1 = a0 + doseMinutes(slot.ml);
+        for (const shift of [-day, 0, day]) {
+            const b0 = o.minute + shift;
+            const b1 = b0 + doseMinutes(o.ml);
+            if (a0 < b1 && b0 < a1) {
+                return o;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Builds the frames for the daily dose plan of a pump (capture 20.11.2026): on = channel on, weekdays + amount,
+ * time; off = channel off. The pump reports time and amount back in its status image, not the weekdays.
+ *
+ * @param pump Pump 1-4
+ * @param id Relative state ID (pumpN.plan)
+ * @param value JSON {on, time "HH:MM", ml, days}
+ */
+export function planCommand(pump: number, id: string, value: ioBroker.StateValue): CommandPlan {
+    let p: Record<string, unknown>;
+    try {
+        p = typeof value === 'string' ? (JSON.parse(value) as Record<string, unknown>) : {};
+    } catch {
+        throw new CommandError(`invalid plan ${JSON.stringify(value)} (JSON expected)`);
+    }
+    if (!p || typeof p !== 'object' || typeof p.on !== 'boolean') {
+        throw new CommandError(`invalid plan ${JSON.stringify(value)} ("on" missing)`);
+    }
+    const ch = pump - 1;
+    if (!p.on) {
+        return {
+            label: `pump ${pump}: daily dose off`,
+            frames: [[CMD_A5, MODE_PLAN_ACTIVE, [ch, 0, 0]]],
+            states: { [id]: JSON.stringify({ on: false }) },
+            confirmPlan: { pump, on: false, time: '', ml: 0 },
+        };
+    }
+    const t = typeof p.time === 'string' ? /^(\d{1,2}):(\d{2})$/.exec(p.time) : null;
+    const hour = t ? Number(t[1]) : NaN;
+    const minute = t ? Number(t[2]) : NaN;
+    if (!t || hour > 23 || minute > 59) {
+        throw new CommandError(`invalid time ${JSON.stringify(p.time)} (HH:MM)`);
+    }
+    const ml = typeof p.ml === 'number' ? p.ml : NaN;
+    const tenths = Math.round(ml * 10);
+    if (!Number.isFinite(ml) || tenths < 1 || tenths > MAX_PLAN_ML * 10) {
+        throw new CommandError(`invalid amount ${JSON.stringify(p.ml)} (0.1-${MAX_PLAN_ML} ml)`);
+    }
+    const days = p.days === undefined ? ALL_DAYS : Number(p.days);
+    if (!Number.isInteger(days) || days < 1 || days > ALL_DAYS) {
+        throw new CommandError(`invalid days ${JSON.stringify(p.days)} (1-127)`);
+    }
+    const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    return {
+        label: `pump ${pump}: daily ${tenths / 10} ml at ${time} (days ${days})`,
+        frames: [
+            [CMD_A5, MODE_PLAN_ACTIVE, [ch, 0, 1]],
+            [CMD_A5, MODE_PLAN_DOSE, [ch, days, 1, 1, tenths >> 8, tenths & 0xff]],
+            [CMD_A5, MODE_PLAN_TIME, [ch, 0, hour, minute, 0, 0]],
+        ],
+        states: { [id]: JSON.stringify({ on: true, time, ml: tenths / 10, days }) },
+        confirmPlan: { pump, on: true, time, ml: tenths / 10 },
     };
 }
 

@@ -16,9 +16,12 @@ import {
     CommandError,
     doctorCommand,
     type CommandPlan,
+    doseMinutes,
     doserCommand,
     fanCommand,
     lightCommand,
+    planConflict,
+    type PlanSlot,
     type RawFrame,
     RESULT_UNACKED,
     RESULT_UNCONFIRMED,
@@ -59,6 +62,8 @@ const SESSION_TIMEOUT_MS = 12_000;
 const CLOCK_MAX_DEVIATION_MIN = 2;
 /** Devices without a readable clock get the clock at least this often */
 const CLOCK_REFRESH_MS = 24 * 3600_000;
+/** Wait before reading a written dose plan back */
+const PLAN_CONFIRM_DELAY_MS = 3000;
 /** First counter check after a manual dose: base delay plus time per ml */
 const DOSE_CONFIRM_DELAY_MS = 15_000;
 const DOSE_MS_PER_ML = 6_000;
@@ -97,6 +102,8 @@ interface DeviceRuntime {
     clockSetAt: number;
     /** Why the clock is due (logged as info); empty = routine (logged as debug) */
     clockReason: string;
+    /** A manual dose runs until this time (ms); no other dose may start before */
+    doseUntil?: number;
     /** Last set values of the writable states */
     values: Record<string, ioBroker.StateValue>;
     /** Last measured on state (power state), undefined = unknown */
@@ -921,6 +928,9 @@ class Chihiros extends utils.Adapter {
         }
         try {
             plan = this.buildPlan(rt, stateId, value);
+            if (d.type === 'doser') {
+                await this.checkNoParallelDose(rt, plan);
+            }
             await this.setState(`${base}.lastCommand`, `${plan.label}${source === 'auto' ? ' (automatic)' : ''}`, true);
             if (!this.proxy?.connection) {
                 throw new CommandError('proxy not connected');
@@ -944,6 +954,9 @@ class Chihiros extends utils.Adapter {
             if (confirm) {
                 await this.setState(`${base}.commandResult`, 'sent, waiting for the pump counter', true);
                 void this.confirmDose(rt, confirm, before);
+            } else if (plan.confirmPlan) {
+                await this.setState(`${base}.commandResult`, 'sent, reading the plan back', true);
+                void this.confirmPlan(rt, plan.confirmPlan, seq);
             } else if (d.type === 'co2' && d.powerState && typeof plan.states.on === 'boolean') {
                 await this.setState(`${base}.commandResult`, 'sent, checking the power', true);
                 void this.confirmCo2(rt, plan.states.on, seq);
@@ -969,6 +982,94 @@ class Chihiros extends utils.Adapter {
             this.log.warn(`${d.name}: ${plan?.label ?? stateId} failed: ${msg}`);
             return false;
         }
+    }
+
+    /**
+     * Dosing never runs on two pumps at the same time (Sven 20.11.2026): a daily dose must not overlap the daily
+     * dose of another pump, a manual dose must not run while a scheduled or another manual dose runs.
+     *
+     * @param rt Runtime data of the dosing pump
+     * @param plan Command plan of the write
+     */
+    private async checkNoParallelDose(rt: DeviceRuntime, plan: CommandPlan): Promise<void> {
+        const base = `devices.${rt.device.id}`;
+        const slots: PlanSlot[] = [];
+        for (let p = 1; p <= PUMPS; p++) {
+            const on = (await this.getStateAsync(`${base}.pump${p}.planOn`))?.val;
+            const time = (await this.getStateAsync(`${base}.pump${p}.planTime`))?.val;
+            const ml = (await this.getStateAsync(`${base}.pump${p}.planMl`))?.val;
+            const m = typeof time === 'string' ? /^(\d{2}):(\d{2})$/.exec(time) : null;
+            if (on === true && m && typeof ml === 'number') {
+                slots.push({ pump: p, minute: Number(m[1]) * 60 + Number(m[2]), ml });
+            }
+        }
+        const fmt = (s: PlanSlot): string =>
+            `pump ${s.pump} doses ${s.ml} ml at ${String(Math.floor(s.minute / 60)).padStart(2, '0')}:${String(s.minute % 60).padStart(2, '0')}`;
+        const cp = plan.confirmPlan;
+        if (cp?.on) {
+            const [h, mi] = cp.time.split(':').map(Number);
+            const hit = planConflict({ pump: cp.pump, minute: h * 60 + mi, ml: cp.ml }, slots);
+            if (hit) {
+                throw new CommandError(`would dose at the same time: ${fmt(hit)} - choose another time`);
+            }
+        }
+        if (plan.confirm) {
+            const now = Date.now();
+            if (rt.doseUntil && now < rt.doseUntil) {
+                throw new CommandError('another manual dose is still running - try again in a minute');
+            }
+            const d = new Date();
+            const minute = d.getHours() * 60 + d.getMinutes();
+            const hit = planConflict({ pump: plan.confirm.pump, minute, ml: plan.confirm.ml }, slots);
+            if (hit) {
+                throw new CommandError(`a scheduled dose runs now: ${fmt(hit)} - try again later`);
+            }
+            rt.doseUntil = now + doseMinutes(plan.confirm.ml) * 60_000;
+        }
+    }
+
+    /**
+     * Confirms a daily dose plan by reading the status image of the pump back (time, amount, on/off).
+     *
+     * @param rt Runtime data of the dosing pump
+     * @param c Expected plan
+     * @param c.pump Pump 1-4
+     * @param c.on Plan on
+     * @param c.time Time HH:MM
+     * @param c.ml Daily amount
+     * @param seq Command number (a newer command stops this check)
+     */
+    private async confirmPlan(
+        rt: DeviceRuntime,
+        c: { pump: number; on: boolean; time: string; ml: number },
+        seq: number,
+    ): Promise<void> {
+        const base = `devices.${rt.device.id}`;
+        await new Promise<void>(r => this.scheduler.setTimeout(r, PLAN_CONFIRM_DELAY_MS));
+        if (this.stopping || seq !== rt.commandSeq) {
+            return;
+        }
+        const values = await this.withGatt(() => this.readDevice(rt));
+        const on = values?.[`pump${c.pump}.planOn`];
+        const time = values?.[`pump${c.pump}.planTime`];
+        const ml = values?.[`pump${c.pump}.planMl`];
+        let text: string;
+        let warn = false;
+        if (!values || on === undefined) {
+            text = 'sent, not confirmed (pump not read)';
+            warn = true;
+        } else if (on === c.on && (!c.on || (time === c.time && ml === c.ml))) {
+            text = c.on
+                ? `confirmed: pump ${c.pump} daily ${c.ml} ml at ${c.time}`
+                : `confirmed: pump ${c.pump} daily dose off`;
+        } else {
+            text = `not confirmed: pump ${c.pump} reports ${on ? `${String(ml)} ml at ${String(time)}` : 'off'} - please check in the app`;
+            warn = true;
+        }
+        if (seq === rt.commandSeq) {
+            await this.setState(`${base}.commandResult`, text, true);
+        }
+        this.log[warn ? 'warn' : 'info'](`${rt.device.name}: ${text}`);
     }
 
     /**

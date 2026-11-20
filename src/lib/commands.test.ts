@@ -5,7 +5,10 @@ import {
     co2Command,
     CommandError,
     doctorCommand,
+    doseMinutes,
     doserCommand,
+    planCommand,
+    planConflict,
     fanCommand,
     lightCommand,
     writeStates,
@@ -18,12 +21,16 @@ describe('commands', () => {
         expect(writeStates('light').map(s => s.id)).to.deep.equal(['red', 'green', 'blue', 'white', 'on']);
         expect(writeStates('light').every(s => s.common.write)).to.equal(true);
         expect(writeStates('doser').map(s => s.id)).to.deep.equal([
+            'pump1.plan',
+            'pump2.plan',
+            'pump3.plan',
+            'pump4.plan',
             'pump1.doseNow',
             'pump2.doseNow',
             'pump3.doseNow',
             'pump4.doseNow',
         ]);
-        expect(writeStates('doser')[0].common.max).to.equal(5);
+        expect(writeStates('doser')[4].common.max).to.equal(5);
         expect(writeStates('fan').map(s => s.id)).to.deep.equal(['level']);
         expect(writeStates('co2').map(s => s.id)).to.deep.equal(['on']);
         expect(writeStates('doctor').map(s => s.id)).to.deep.equal(['mode']);
@@ -191,5 +198,49 @@ describe('commands', () => {
             expect(() => doctorCommand('mode', v)).to.throw(CommandError);
         }
         expect(() => doctorCommand('waterTemp', 'fish')).to.throw(/not writable/);
+    });
+
+    it('daily dose plan: frames like the app (capture 20.11.2026) and limits', () => {
+        // the app wrote P2 (index 1): a5/20 [01 00 01], a5/1b [01 7f 01 01 00 32], a5/15 [01 00 0e 03 00 00]
+        const p = doserCommand('pump2.plan', '{"on":true,"time":"14:03","ml":5,"days":127}');
+        expect(p.frames).to.deep.equal([
+            [0xa5, 0x20, [1, 0, 1]],
+            [0xa5, 0x1b, [1, 0x7f, 1, 1, 0, 50]],
+            [0xa5, 0x15, [1, 0, 14, 3, 0, 0]],
+        ]);
+        expect(p.confirmPlan).to.deep.equal({ pump: 2, on: true, time: '14:03', ml: 5 });
+        expect(p.states).to.deep.equal({ 'pump2.plan': '{"on":true,"time":"14:03","ml":5,"days":127}' });
+        expect(planCommand(4, 'pump4.plan', '{"on":true,"time":"8:00","ml":25.6}').frames[1]).to.deep.equal([
+            0xa5,
+            0x1b,
+            [3, 0x7f, 1, 1, 1, 0],
+        ]);
+        expect(doserCommand('pump1.plan', '{"on":false}').frames).to.deep.equal([[0xa5, 0x20, [0, 0, 0]]]);
+        for (const v of [
+            'x',
+            '{}',
+            '{"on":true,"time":"25:00","ml":1}',
+            '{"on":true,"time":"10:00","ml":0}',
+            '{"on":true,"time":"10:00","ml":31}',
+            '{"on":true,"time":"10:00","ml":1,"days":0}',
+            '{"on":true,"time":"10:00","ml":1,"days":128}',
+        ]) {
+            expect(() => doserCommand('pump1.plan', v), v).to.throw(CommandError);
+        }
+    });
+
+    it('never two doses at the same time (Sven 20.11.2026)', () => {
+        expect(doseMinutes(5)).to.equal(2);
+        expect(doseMinutes(10)).to.equal(2);
+        expect(doseMinutes(30)).to.equal(4);
+        // plans of 20.11.2026: P3 10 ml at 14:00, P2 5 ml at 14:03
+        const p3 = { pump: 3, minute: 840, ml: 10 };
+        expect(planConflict({ pump: 2, minute: 843, ml: 5 }, [p3])).to.equal(null);
+        expect(planConflict({ pump: 2, minute: 842, ml: 5 }, [p3])).to.equal(null);
+        expect(planConflict({ pump: 2, minute: 841, ml: 5 }, [p3])).to.deep.equal(p3);
+        expect(planConflict({ pump: 4, minute: 839, ml: 1 }, [p3])).to.deep.equal(p3);
+        expect(planConflict({ pump: 3, minute: 840, ml: 10 }, [p3])).to.equal(null);
+        // across midnight
+        expect(planConflict({ pump: 1, minute: 0, ml: 1 }, [{ pump: 2, minute: 1439, ml: 5 }])).to.not.equal(null);
     });
 });

@@ -38,6 +38,7 @@ const FIRST_READ_DELAY_MS = 2e4;
 const SESSION_TIMEOUT_MS = 12e3;
 const CLOCK_MAX_DEVIATION_MIN = 2;
 const CLOCK_REFRESH_MS = 24 * 36e5;
+const PLAN_CONFIRM_DELAY_MS = 3e3;
 const DOSE_CONFIRM_DELAY_MS = 15e3;
 const DOSE_MS_PER_ML = 6e3;
 const DOSE_CONFIRM_RETRY_MS = 3e4;
@@ -823,6 +824,9 @@ class Chihiros extends utils.Adapter {
     }
     try {
       plan = this.buildPlan(rt, stateId, value);
+      if (d.type === "doser") {
+        await this.checkNoParallelDose(rt, plan);
+      }
       await this.setState(`${base}.lastCommand`, `${plan.label}${source === "auto" ? " (automatic)" : ""}`, true);
       if (!((_a = this.proxy) == null ? void 0 : _a.connection)) {
         throw new import_commands.CommandError("proxy not connected");
@@ -846,6 +850,9 @@ class Chihiros extends utils.Adapter {
       if (confirm) {
         await this.setState(`${base}.commandResult`, "sent, waiting for the pump counter", true);
         void this.confirmDose(rt, confirm, before);
+      } else if (plan.confirmPlan) {
+        await this.setState(`${base}.commandResult`, "sent, reading the plan back", true);
+        void this.confirmPlan(rt, plan.confirmPlan, seq);
       } else if (d.type === "co2" && d.powerState && typeof plan.states.on === "boolean") {
         await this.setState(`${base}.commandResult`, "sent, checking the power", true);
         void this.confirmCo2(rt, plan.states.on, seq);
@@ -870,6 +877,86 @@ class Chihiros extends utils.Adapter {
       this.log.warn(`${d.name}: ${(_c = plan == null ? void 0 : plan.label) != null ? _c : stateId} failed: ${msg}`);
       return false;
     }
+  }
+  /**
+   * Dosing never runs on two pumps at the same time (Sven 20.11.2026): a daily dose must not overlap the daily
+   * dose of another pump, a manual dose must not run while a scheduled or another manual dose runs.
+   *
+   * @param rt Runtime data of the dosing pump
+   * @param plan Command plan of the write
+   */
+  async checkNoParallelDose(rt, plan) {
+    var _a, _b, _c;
+    const base = `devices.${rt.device.id}`;
+    const slots = [];
+    for (let p = 1; p <= import_states.PUMPS; p++) {
+      const on = (_a = await this.getStateAsync(`${base}.pump${p}.planOn`)) == null ? void 0 : _a.val;
+      const time = (_b = await this.getStateAsync(`${base}.pump${p}.planTime`)) == null ? void 0 : _b.val;
+      const ml = (_c = await this.getStateAsync(`${base}.pump${p}.planMl`)) == null ? void 0 : _c.val;
+      const m = typeof time === "string" ? /^(\d{2}):(\d{2})$/.exec(time) : null;
+      if (on === true && m && typeof ml === "number") {
+        slots.push({ pump: p, minute: Number(m[1]) * 60 + Number(m[2]), ml });
+      }
+    }
+    const fmt = (s) => `pump ${s.pump} doses ${s.ml} ml at ${String(Math.floor(s.minute / 60)).padStart(2, "0")}:${String(s.minute % 60).padStart(2, "0")}`;
+    const cp = plan.confirmPlan;
+    if (cp == null ? void 0 : cp.on) {
+      const [h, mi] = cp.time.split(":").map(Number);
+      const hit = (0, import_commands.planConflict)({ pump: cp.pump, minute: h * 60 + mi, ml: cp.ml }, slots);
+      if (hit) {
+        throw new import_commands.CommandError(`would dose at the same time: ${fmt(hit)} - choose another time`);
+      }
+    }
+    if (plan.confirm) {
+      const now = Date.now();
+      if (rt.doseUntil && now < rt.doseUntil) {
+        throw new import_commands.CommandError("another manual dose is still running - try again in a minute");
+      }
+      const d = /* @__PURE__ */ new Date();
+      const minute = d.getHours() * 60 + d.getMinutes();
+      const hit = (0, import_commands.planConflict)({ pump: plan.confirm.pump, minute, ml: plan.confirm.ml }, slots);
+      if (hit) {
+        throw new import_commands.CommandError(`a scheduled dose runs now: ${fmt(hit)} - try again later`);
+      }
+      rt.doseUntil = now + (0, import_commands.doseMinutes)(plan.confirm.ml) * 6e4;
+    }
+  }
+  /**
+   * Confirms a daily dose plan by reading the status image of the pump back (time, amount, on/off).
+   *
+   * @param rt Runtime data of the dosing pump
+   * @param c Expected plan
+   * @param c.pump Pump 1-4
+   * @param c.on Plan on
+   * @param c.time Time HH:MM
+   * @param c.ml Daily amount
+   * @param seq Command number (a newer command stops this check)
+   */
+  async confirmPlan(rt, c, seq) {
+    const base = `devices.${rt.device.id}`;
+    await new Promise((r) => this.scheduler.setTimeout(r, PLAN_CONFIRM_DELAY_MS));
+    if (this.stopping || seq !== rt.commandSeq) {
+      return;
+    }
+    const values = await this.withGatt(() => this.readDevice(rt));
+    const on = values == null ? void 0 : values[`pump${c.pump}.planOn`];
+    const time = values == null ? void 0 : values[`pump${c.pump}.planTime`];
+    const ml = values == null ? void 0 : values[`pump${c.pump}.planMl`];
+    let text;
+    let warn = false;
+    if (!values || on === void 0) {
+      text = "sent, not confirmed (pump not read)";
+      warn = true;
+    } else if (on === c.on && (!c.on || time === c.time && ml === c.ml)) {
+      text = c.on ? `confirmed: pump ${c.pump} daily ${c.ml} ml at ${c.time}` : `confirmed: pump ${c.pump} daily dose off`;
+    } else {
+      text = `not confirmed: pump ${c.pump} reports ${on ? `${String(ml)} ml at ${String(time)}` : "off"} - please check in the app`;
+      warn = true;
+    }
+    if (seq === rt.commandSeq) {
+      await this.setState(`${base}.commandResult`, text, true);
+    }
+    this.log[warn ? "warn" : "info"](`${rt.device.name}: ${text}`);
   }
   /**
    * Confirms a manual dose by the total counter of the pump (read after the pump had time to run).

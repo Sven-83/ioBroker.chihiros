@@ -31,7 +31,7 @@ function readPlan(type, ids) {
     case "doser":
       return {
         frames: [frame(import_protocol.QUERY.status), frame(import_protocol.QUERY.doserTotal), frame(import_protocol.QUERY.doserToday)],
-        isDone: (a) => has(a, import_protocol.MSG.doserTotal) && has(a, import_protocol.MSG.doserToday)
+        isDone: (a) => has(a, import_protocol.MSG.doserTotal) && has(a, import_protocol.MSG.doserToday) && has(a, import_protocol.MSG.image)
       };
     case "light":
       return { frames: [frame(import_protocol.QUERY.status)], isDone: (a) => has(a, import_protocol.MSG.image) };
@@ -53,6 +53,11 @@ function interpret(type, answers) {
       const today = last(import_protocol.MSG.doserToday);
       out.doserTotal = (_a = total && (0, import_protocol.decodeDoserMl)(total)) != null ? _a : void 0;
       out.doserToday = (_b = today && (0, import_protocol.decodeDoserMl)(today)) != null ? _b : void 0;
+      const img = last(import_protocol.MSG.image);
+      const plan = img && (0, import_protocol.decodeDoserPlan)(img);
+      if (plan) {
+        out.doserPlan = plan;
+      }
       break;
     }
     case "light": {

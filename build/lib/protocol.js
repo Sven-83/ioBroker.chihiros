@@ -26,6 +26,7 @@ __export(protocol_exports, {
   decodeAnswer: () => decodeAnswer,
   decodeDoctorLive: () => decodeDoctorLive,
   decodeDoserMl: () => decodeDoserMl,
+  decodeDoserPlan: () => decodeDoserPlan,
   decodeFanLive: () => decodeFanLive,
   decodeLightImage: () => decodeLightImage,
   encodeFrame: () => encodeFrame,
@@ -111,6 +112,23 @@ function decodeDoserMl(a) {
   }
   return [0, 2, 4, 6].map((i) => u16(a.payload, i) / 10);
 }
+function decodeDoserPlan(a) {
+  const p = a.payload;
+  if (a.type !== MSG.image || p.length < 3 + 9 * 4 || p[1] > 23 || p[2] > 59) {
+    return null;
+  }
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const b = 3 + 9 * i;
+    const h = p[b + 1];
+    const m = p[b + 2];
+    if (h > 23 || m > 59) {
+      return null;
+    }
+    out.push({ on: p[b] === 0, minute: h * 60 + m, ml: u16(p, b + 7) / 10 });
+  }
+  return out;
+}
 function decodeLightImage(a) {
   const p = a.payload;
   if (a.type !== MSG.image || p.length < 20 || p[1] > 23 || p[2] > 59) {
@@ -180,6 +198,7 @@ function scheduleWindows(points) {
   decodeAnswer,
   decodeDoctorLive,
   decodeDoserMl,
+  decodeDoserPlan,
   decodeFanLive,
   decodeLightImage,
   encodeFrame,

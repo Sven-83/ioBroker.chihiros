@@ -6,6 +6,8 @@ import {
     type Answer,
     decodeDoctorLive,
     decodeDoserMl,
+    decodeDoserPlan,
+    type DoserPlan,
     decodeFanLive,
     decodeLightImage,
     encodeFrame,
@@ -24,6 +26,8 @@ export interface ReadResult {
     doserTotal?: number[];
     /** Dosed ml per pump today */
     doserToday?: number[];
+    /** Daily dose per pump as stored in the pump */
+    doserPlan?: DoserPlan[];
     /** Clock and schedule of the light */
     light?: LightImage;
 }
@@ -51,7 +55,7 @@ export function readPlan(type: DeviceType, ids: MessageIds): ReadPlan {
         case 'doser':
             return {
                 frames: [frame(QUERY.status), frame(QUERY.doserTotal), frame(QUERY.doserToday)],
-                isDone: a => has(a, MSG.doserTotal) && has(a, MSG.doserToday),
+                isDone: a => has(a, MSG.doserTotal) && has(a, MSG.doserToday) && has(a, MSG.image),
             };
         case 'light':
             return { frames: [frame(QUERY.status)], isDone: a => has(a, MSG.image) };
@@ -79,6 +83,11 @@ export function interpret(type: DeviceType, answers: Answer[]): ReadResult {
             const today = last(MSG.doserToday);
             out.doserTotal = (total && decodeDoserMl(total)) ?? undefined;
             out.doserToday = (today && decodeDoserMl(today)) ?? undefined;
+            const img = last(MSG.image);
+            const plan = img && decodeDoserPlan(img);
+            if (plan) {
+                out.doserPlan = plan;
+            }
             break;
         }
         case 'light': {

@@ -55,6 +55,32 @@ function readStates(type) {
       for (let p = 1; p <= PUMPS; p++) {
         out.push({ id: `pump${p}.total`, common: num(`Pump ${p}: dosed in total`, "value", "ml") });
         out.push({ id: `pump${p}.today`, common: num(`Pump ${p}: dosed today (scheduled)`, "value", "ml") });
+        out.push({
+          id: `pump${p}.planOn`,
+          common: {
+            name: `Pump ${p}: daily dose programmed (read from the pump)`,
+            type: "boolean",
+            role: "indicator",
+            read: true,
+            write: false,
+            def: false
+          }
+        });
+        out.push({
+          id: `pump${p}.planTime`,
+          common: {
+            name: `Pump ${p}: time of the daily dose (read from the pump)`,
+            type: "string",
+            role: "text",
+            read: true,
+            write: false,
+            def: ""
+          }
+        });
+        out.push({
+          id: `pump${p}.planMl`,
+          common: num(`Pump ${p}: daily dose (read from the pump)`, "value", "ml")
+        });
       }
       return out;
     }
@@ -96,6 +122,13 @@ function resultToStates(result, now) {
   }
   if (result.doserToday) {
     result.doserToday.forEach((v, i) => out[`pump${i + 1}.today`] = v);
+  }
+  if (result.doserPlan) {
+    result.doserPlan.forEach((p, i) => {
+      out[`pump${i + 1}.planOn`] = p.on;
+      out[`pump${i + 1}.planTime`] = p.on ? (0, import_protocol.formatMinute)(p.minute) : "";
+      out[`pump${i + 1}.planMl`] = p.on ? p.ml : 0;
+    });
   }
   if (result.live) {
     for (const k of ["waterTemp", "roomTemp", "humidity"]) {

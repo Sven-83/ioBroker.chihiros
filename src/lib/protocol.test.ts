@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import {
+    decodeDoserPlan,
     decodeAnswer,
     decodeDoctorLive,
     decodeDoserMl,
@@ -24,6 +25,13 @@ const hex = (s: string): number[] => s.split(' ').map(x => parseInt(x, 16));
 // answers captured from real devices on 17.11.2026 (no addresses inside)
 const LIGHT_IMAGE = hex(
     '5b 17 30 00 01 fe 02 0e 00 0b 00 0e 00 00 00 0c 00 00 00 00 00 00 02 0e 00 0b 00 00 0b 01 85 0b 3b 85 0c 00 00 0e 00 00 0e 01 85 13 3b 85 14 00 00 00',
+);
+// status image of the dosing pump before and after the app changed the time of P2 (capture 20.11.2026 18:30/18:32)
+const DOSER_IMAGE = hex(
+    '5b 08 30 00 01 fe 05 12 1e 04 00 00 00 00 00 00 00 00 00 0e 02 00 00 00 00 00 32 00 0e 00 00 00 00 00 00 64 04 00 00 00 00 00 00 00 00 00 05 0a 00 00',
+);
+const DOSER_IMAGE_AFTER = hex(
+    '5b 08 30 00 01 fe 05 12 20 04 00 00 00 00 00 00 00 00 00 0e 03 00 00 00 00 00 32 00 0e 00 00 00 00 00 00 64 04 00 00 00 00 00 00 00 00 00 05 0a 00 00',
 );
 const DOSER_TOTAL = hex('5b 01 0a 00 01 1e 00 00 0e 12 1c 84 00 00 14');
 const DOSER_TODAY = hex('5b 01 0a 00 01 22 00 00 00 00 00 64 00 00 28');
@@ -138,5 +146,20 @@ describe('protocol', () => {
         it('rejects other images', () => {
             expect(decodeLightImage(decodeAnswer(DOSER_TOTAL)!)).to.equal(null);
         });
+    });
+
+    it('decodes the daily dose plan of the dosing pump (status image 0xfe)', () => {
+        expect(decodeDoserPlan(decodeAnswer(DOSER_IMAGE)!)).to.deep.equal([
+            { on: false, minute: 0, ml: 0 },
+            { on: true, minute: 14 * 60 + 2, ml: 5 },
+            { on: true, minute: 14 * 60, ml: 10 },
+            { on: false, minute: 0, ml: 0 },
+        ]);
+        expect(decodeDoserPlan(decodeAnswer(DOSER_IMAGE_AFTER)!)![1]).to.deep.equal({
+            on: true,
+            minute: 14 * 60 + 3,
+            ml: 5,
+        });
+        expect(decodeDoserPlan(decodeAnswer(DOSER_TOTAL)!)).to.equal(null);
     });
 });

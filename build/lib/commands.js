@@ -18,17 +18,24 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var commands_exports = {};
 __export(commands_exports, {
+  ALL_DAYS: () => ALL_DAYS,
   COMMON_COMMAND_STATES: () => COMMON_COMMAND_STATES,
   CommandError: () => CommandError,
   DOCTOR_MODES: () => DOCTOR_MODES,
+  DOSE_GAP_MIN: () => DOSE_GAP_MIN,
+  DOSE_SECONDS_PER_ML: () => DOSE_SECONDS_PER_ML,
   LIGHT_CHANNELS: () => LIGHT_CHANNELS,
   MAX_DOSE_ML: () => MAX_DOSE_ML,
   MAX_FAN_LEVEL: () => MAX_FAN_LEVEL,
+  MAX_PLAN_ML: () => MAX_PLAN_ML,
   MODE_CHANNEL: () => MODE_CHANNEL,
   MODE_CLOCK: () => MODE_CLOCK,
   MODE_CO2_SCHEDULE: () => MODE_CO2_SCHEDULE,
   MODE_DOCTOR_RUN: () => MODE_DOCTOR_RUN,
   MODE_DOSE: () => MODE_DOSE,
+  MODE_PLAN_ACTIVE: () => MODE_PLAN_ACTIVE,
+  MODE_PLAN_DOSE: () => MODE_PLAN_DOSE,
+  MODE_PLAN_TIME: () => MODE_PLAN_TIME,
   MODE_QUERY: () => MODE_QUERY,
   MODE_SETTING: () => MODE_SETTING,
   RESULT_UNACKED: () => RESULT_UNACKED,
@@ -37,9 +44,12 @@ __export(commands_exports, {
   clockParams: () => clockParams,
   co2Command: () => co2Command,
   doctorCommand: () => doctorCommand,
+  doseMinutes: () => doseMinutes,
   doserCommand: () => doserCommand,
   fanCommand: () => fanCommand,
   lightCommand: () => lightCommand,
+  planCommand: () => planCommand,
+  planConflict: () => planConflict,
   writeStates: () => writeStates
 });
 module.exports = __toCommonJS(commands_exports);
@@ -50,6 +60,11 @@ const MODE_QUERY = 4;
 const MODE_CHANNEL = 7;
 const MODE_DOSE = 27;
 const MAX_DOSE_ML = 5;
+const MODE_PLAN_ACTIVE = 32;
+const MODE_PLAN_DOSE = 27;
+const MODE_PLAN_TIME = 21;
+const ALL_DAYS = 127;
+const MAX_PLAN_ML = 30;
 const MODE_SETTING = 5;
 const MODE_CO2_SCHEDULE = 22;
 const MODE_DOCTOR_RUN = 1;
@@ -116,21 +131,35 @@ function writeStates(type) {
         }
       ];
     case "doser":
-      return Array.from({ length: import_states.PUMPS }, (_, i) => ({
-        id: `pump${i + 1}.doseNow`,
-        common: {
-          name: `Pump ${i + 1}: dose now (ml, 0.1-${MAX_DOSE_ML})`,
-          type: "number",
-          role: "level",
-          unit: "ml",
-          min: 0,
-          max: MAX_DOSE_ML,
-          step: 0.1,
-          read: true,
-          write: true,
-          def: 0
+      return Array.from({ length: import_states.PUMPS }, (_, i) => [
+        {
+          id: `pump${i + 1}.plan`,
+          common: {
+            name: `Pump ${i + 1}: daily dose plan as JSON {"on":true,"time":"14:00","ml":5,"days":127} (days: bit mask, 127 = every day)`,
+            type: "string",
+            role: "json",
+            read: true,
+            write: true,
+            def: ""
+          }
         }
-      }));
+      ]).flat().concat(
+        Array.from({ length: import_states.PUMPS }, (_, i) => ({
+          id: `pump${i + 1}.doseNow`,
+          common: {
+            name: `Pump ${i + 1}: dose now (ml, 0.1-${MAX_DOSE_ML})`,
+            type: "number",
+            role: "level",
+            unit: "ml",
+            min: 0,
+            max: MAX_DOSE_ML,
+            step: 0.1,
+            read: true,
+            write: true,
+            def: 0
+          }
+        }))
+      );
     case "co2":
       return [
         {
@@ -222,6 +251,10 @@ function lightCommand(id, value, current) {
   throw new CommandError(`${id} is not writable`);
 }
 function doserCommand(id, value) {
+  const plan = /^pump([1-4])\.plan$/.exec(id);
+  if (plan) {
+    return planCommand(Number(plan[1]), id, value);
+  }
   const m = /^pump([1-4])\.doseNow$/.exec(id);
   if (!m) {
     throw new CommandError(`${id} is not writable`);
@@ -241,6 +274,75 @@ function doserCommand(id, value) {
     frames: [[import_protocol.CMD_A5, MODE_DOSE, [pump - 1, 0, 0, 0, tenths]]],
     states: { [id]: ml },
     confirm: { pump, ml }
+  };
+}
+const DOSE_SECONDS_PER_ML = 6;
+const DOSE_GAP_MIN = 1;
+function doseMinutes(ml) {
+  return Math.max(1, Math.ceil(ml * DOSE_SECONDS_PER_ML / 60)) + DOSE_GAP_MIN;
+}
+function planConflict(slot, others) {
+  const day = 1440;
+  for (const o of others) {
+    if (o.pump === slot.pump) {
+      continue;
+    }
+    const a0 = slot.minute;
+    const a1 = a0 + doseMinutes(slot.ml);
+    for (const shift of [-day, 0, day]) {
+      const b0 = o.minute + shift;
+      const b1 = b0 + doseMinutes(o.ml);
+      if (a0 < b1 && b0 < a1) {
+        return o;
+      }
+    }
+  }
+  return null;
+}
+function planCommand(pump, id, value) {
+  let p;
+  try {
+    p = typeof value === "string" ? JSON.parse(value) : {};
+  } catch {
+    throw new CommandError(`invalid plan ${JSON.stringify(value)} (JSON expected)`);
+  }
+  if (!p || typeof p !== "object" || typeof p.on !== "boolean") {
+    throw new CommandError(`invalid plan ${JSON.stringify(value)} ("on" missing)`);
+  }
+  const ch = pump - 1;
+  if (!p.on) {
+    return {
+      label: `pump ${pump}: daily dose off`,
+      frames: [[import_protocol.CMD_A5, MODE_PLAN_ACTIVE, [ch, 0, 0]]],
+      states: { [id]: JSON.stringify({ on: false }) },
+      confirmPlan: { pump, on: false, time: "", ml: 0 }
+    };
+  }
+  const t = typeof p.time === "string" ? /^(\d{1,2}):(\d{2})$/.exec(p.time) : null;
+  const hour = t ? Number(t[1]) : NaN;
+  const minute = t ? Number(t[2]) : NaN;
+  if (!t || hour > 23 || minute > 59) {
+    throw new CommandError(`invalid time ${JSON.stringify(p.time)} (HH:MM)`);
+  }
+  const ml = typeof p.ml === "number" ? p.ml : NaN;
+  const tenths = Math.round(ml * 10);
+  if (!Number.isFinite(ml) || tenths < 1 || tenths > MAX_PLAN_ML * 10) {
+    throw new CommandError(`invalid amount ${JSON.stringify(p.ml)} (0.1-${MAX_PLAN_ML} ml)`);
+  }
+  const days = p.days === void 0 ? ALL_DAYS : Number(p.days);
+  if (!Number.isInteger(days) || days < 1 || days > ALL_DAYS) {
+    throw new CommandError(`invalid days ${JSON.stringify(p.days)} (1-127)`);
+  }
+  const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return {
+    label: `pump ${pump}: daily ${tenths / 10} ml at ${time} (days ${days})`,
+    frames: [
+      [import_protocol.CMD_A5, MODE_PLAN_ACTIVE, [ch, 0, 1]],
+      [import_protocol.CMD_A5, MODE_PLAN_DOSE, [ch, days, 1, 1, tenths >> 8, tenths & 255]],
+      [import_protocol.CMD_A5, MODE_PLAN_TIME, [ch, 0, hour, minute, 0, 0]]
+    ],
+    states: { [id]: JSON.stringify({ on: true, time, ml: tenths / 10, days }) },
+    confirmPlan: { pump, on: true, time, ml: tenths / 10 }
   };
 }
 function fanCommand(id, value) {
@@ -304,17 +406,24 @@ function doctorCommand(id, value) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  ALL_DAYS,
   COMMON_COMMAND_STATES,
   CommandError,
   DOCTOR_MODES,
+  DOSE_GAP_MIN,
+  DOSE_SECONDS_PER_ML,
   LIGHT_CHANNELS,
   MAX_DOSE_ML,
   MAX_FAN_LEVEL,
+  MAX_PLAN_ML,
   MODE_CHANNEL,
   MODE_CLOCK,
   MODE_CO2_SCHEDULE,
   MODE_DOCTOR_RUN,
   MODE_DOSE,
+  MODE_PLAN_ACTIVE,
+  MODE_PLAN_DOSE,
+  MODE_PLAN_TIME,
   MODE_QUERY,
   MODE_SETTING,
   RESULT_UNACKED,
@@ -323,9 +432,12 @@ function doctorCommand(id, value) {
   clockParams,
   co2Command,
   doctorCommand,
+  doseMinutes,
   doserCommand,
   fanCommand,
   lightCommand,
+  planCommand,
+  planConflict,
   writeStates
 });
 //# sourceMappingURL=commands.js.map
